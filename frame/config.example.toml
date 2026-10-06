@@ -43,6 +43,7 @@ saturation = 0.6       # Inky colour saturation, 0 to 1
 mat = 0.0              # extra shrink of the content inside the A5 opening (0 = none)
 opening = 0.7071       # opening height as a panel fraction; raise toward 0.98 for a bare panel
 # panel = "el133uf1"   # force the 13.3" driver if auto-detect ever fails
+# panel = "waveshare_7in3e"   # Waveshare 7.3" HAT: _7in3e, _7in3f or _7in3g (install.sh --panel)
 
 # --- Refresh cadence --------------------------------------------------------
 # The panel refreshes only when the species set or a count bracket changes,

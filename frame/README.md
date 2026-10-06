@@ -70,6 +70,8 @@ Pick how the frame gets its birds:
 
 Each one enables SPI + I2C, installs the deps and a systemd timer, writes `~/.birdframe/config.toml`, and reboots once to bring SPI up. Full options live in [`config.example.toml`](config.example.toml). The station ID is the public number at the end of a BirdWeather station-page URL, not its upload token. ZIP mode summarizes nearby stations and can use fallbacks; station mode shows only that station and fails rather than substituting another source.
 
+For a Waveshare 7.3" e-Paper HAT (800x480) instead of the Inky, add `--panel waveshare_7in3e`, `waveshare_7in3f` or `waveshare_7in3g` to match your panel, e.g. `./install.sh --panel waveshare_7in3e`. The installer then installs the driver's Python packages (`requirements-waveshare.txt`), and writes `panel`, `opening = 0.98` and, in local mode, `schedule = "sun"` to a new config. It does not add the Inky's `dtoverlay=spi0-0cs`, and comments it out (then reboots) if an earlier Inky install left it in `config.txt`, because the Waveshare driver needs the hardware chip-select. An existing config is kept; if it lacks the `panel` line, the installer says so.
+
 The default layout matches the A5 opening in the frame listed above. If you use a different mat or a bare panel, set `opening` in `~/.birdframe/config.toml`; `0.7071` preserves the current A5 dimensions, while values up to about `0.98` use more of the panel. This one setting scales a fixed 1:sqrt(2) opening, not width and height independently. For a B5 opening, `0.84` is a useful starting point, but check it against your physical mat.
 
 Bird names are off on the frame by default. Turn them on or off at any time; the command saves the preference and requests an immediate refresh:

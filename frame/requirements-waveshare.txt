@@ -1,0 +1,5 @@
+# Frame Pi with a Waveshare 7.3" e-Paper HAT: the vendored waveshare_epd
+# driver talks to the panel through these. install.sh --panel installs them.
+gpiozero
+lgpio
+spidev

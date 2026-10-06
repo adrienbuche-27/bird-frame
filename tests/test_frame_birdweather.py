@@ -274,8 +274,8 @@ class FrameInstallerTests(unittest.TestCase):
         frame = root / "frame"
         frame.mkdir()
         (frame / "systemd").mkdir()
-        for name in ("install.sh", "requirements-frame.txt", "birdweather.py",
-                     "config_contract.py", "birdframe-names"):
+        for name in ("install.sh", "requirements-frame.txt", "requirements-waveshare.txt",
+                     "birdweather.py", "config_contract.py", "birdframe-names"):
             shutil.copy2(FRAME / name, frame / name)
         for name in ("birdframe.service", "birdframe.timer"):
             shutil.copy2(FRAME / "systemd" / name, frame / "systemd" / name)
@@ -597,6 +597,61 @@ class FrameInstallerTests(unittest.TestCase):
         self.assertIn("could not be verified", result.stdout)
         self.assertNotIn("1/5", result.stdout)
         self.assertEqual(config, "")
+
+    def boot_config(self, text):
+        path = pathlib.Path(tempfile.mkdtemp()) / "config.txt"
+        self.addCleanup(shutil.rmtree, path.parent)
+        path.write_text(text, encoding="utf-8")
+        return {"BIRDFRAME_CONFIG_TXT": str(path)}
+
+    def test_waveshare_panel_writes_panel_opening_and_sun_schedule(self):
+        result, config = self.run_install(
+            "--panel", "waveshare_7in3e", extra_env=self.boot_config("dtparam=spi=on\n"))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('panel = "waveshare_7in3e"', config)
+        self.assertIn("opening = 0.98", config)
+        self.assertIn('schedule = "sun"', config)
+        self.assertIn("Waveshare driver dependencies", result.stdout)
+        self.assertNotIn("Commenting out", result.stdout)
+
+    def test_waveshare_panel_comments_out_the_inky_overlay_and_reboots(self):
+        result, _config = self.run_install(
+            "--panel=waveshare_7in3f",
+            extra_env=self.boot_config("dtparam=spi=on\ndtoverlay=spi0-0cs\n"))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Commenting out dtoverlay=spi0-0cs", result.stdout)
+        self.assertIn("Rebooting so the SPI change takes effect", result.stdout)
+
+    def test_waveshare_panel_in_other_modes_skips_the_sun_schedule(self):
+        result, config = self.run_install(
+            "--station-id", "314", "--panel", "waveshare_7in3g",
+            extra_env=self.boot_config(""))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('panel = "waveshare_7in3g"', config)
+        self.assertNotIn("schedule", config)
+
+    def test_inky_default_is_unchanged(self):
+        result, config = self.run_install(extra_env=self.boot_config(""))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("SPI + I2C (Inky", result.stdout)
+        self.assertNotIn("panel =", config)
+        self.assertNotIn("schedule", config)
+        self.assertNotIn("Waveshare", result.stdout)
+
+    def test_invalid_panel_is_rejected_before_install(self):
+        result, config = self.run_install("--panel", "inky_13")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("--panel must be", result.stdout)
+        self.assertNotIn("1/5", result.stdout)
+        self.assertEqual(config, "")
+
+    def test_existing_config_without_panel_gets_a_note_not_an_edit(self):
+        existing = 'base_url = "http://birdnet.local"\nshoot = true\n'
+        result, config = self.run_install(
+            "--panel", "waveshare_7in3e", existing=existing, extra_env=self.boot_config(""))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(config, existing)
+        self.assertIn('does not set panel = "waveshare_7in3e"', result.stdout)
 
 
 if __name__ == "__main__":

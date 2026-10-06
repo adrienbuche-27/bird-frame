@@ -10,6 +10,9 @@
 #   ./install.sh --bird-weather --zip <ZIP> standalone from BirdWeather, no mic
 #                                           (add --ebird-key <KEY> for remote ZIPs)
 #   ./install.sh --station-id <ID>           follow one public BirdWeather station
+#
+# Panel: the Pimoroni Inky Impression by default. For a Waveshare 7.3" HAT add
+#   --panel waveshare_7in3e | waveshare_7in3f | waveshare_7in3g
 set -euo pipefail
 cd "$(dirname "$0")"
 FRAME="$(pwd)"
@@ -20,6 +23,7 @@ ZIP=""
 STATION_ID=""
 IMAGE_URL=""
 EBIRD_KEY=""
+PANEL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --bird-weather) BIRD_WEATHER=1; MODE=birdweather; shift ;;
@@ -35,6 +39,9 @@ while [ $# -gt 0 ]; do
     --ebird-key) [ $# -ge 2 ] || { echo "--ebird-key needs a value (a free key from ebird.org/api/keygen)" >&2; exit 1; }
                  EBIRD_KEY="$2"; shift 2 ;;
     --ebird-key=*) EBIRD_KEY="${1#*=}"; shift ;;
+    --panel) [ $# -ge 2 ] || { echo "--panel needs a value, e.g. --panel waveshare_7in3e" >&2; exit 1; }
+             PANEL="$2"; shift 2 ;;
+    --panel=*) PANEL="${1#*=}"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -59,6 +66,13 @@ if [ -n "$STATION_ID" ] && [ -n "$EBIRD_KEY" ]; then
   echo "--ebird-key only applies to BirdWeather ZIP mode" >&2
   exit 1
 fi
+
+case "$PANEL" in
+  ""|waveshare_7in3e|waveshare_7in3f|waveshare_7in3g) ;;
+  *) echo "--panel must be waveshare_7in3e, waveshare_7in3f or waveshare_7in3g" >&2; exit 1 ;;
+esac
+WAVESHARE=0
+if [ -n "$PANEL" ]; then WAVESHARE=1; fi
 
 # Validate inputs up front: a bad value would otherwise land in a config file or
 # a systemd unit verbatim. These checks also reject a flag passed as a value
@@ -135,6 +149,10 @@ if [ -f "$CONFIG" ]; then
     echo "Review the file, or remove it and re-run the installer to switch sources." >&2
     exit 1
   fi
+  if [ "$WAVESHARE" = 1 ] && ! grep -qE "^panel[[:space:]]*=[[:space:]]*\"$PANEL\"" "$CONFIG"; then
+    echo "Note: $CONFIG is kept as is and does not set panel = \"$PANEL\"."
+    echo "      Add that line (and opening = 0.98 for a bare panel) or the frame will look for an Inky board."
+  fi
 fi
 
 if [ -n "$STATION_ID" ] && [ "$CONFIG_EXISTS" = 0 ]; then
@@ -149,13 +167,26 @@ fi
 NEEDS_BROWSER=1
 if [ "$MODE" = image ]; then NEEDS_BROWSER=0; fi
 
-CONFIG_TXT=/boot/firmware/config.txt
+CONFIG_TXT="${BIRDFRAME_CONFIG_TXT:-/boot/firmware/config.txt}"
 [ -f "$CONFIG_TXT" ] || CONFIG_TXT=/boot/config.txt
+REBOOT_FOR_SPI=0
 
-echo "1/5  Enabling SPI + I2C (Inky needs both; SPI with no chip-select)..."
-sudo raspi-config nonint do_spi 0
-sudo raspi-config nonint do_i2c 0
-grep -q "^dtoverlay=spi0-0cs" "$CONFIG_TXT" || echo "dtoverlay=spi0-0cs" | sudo tee -a "$CONFIG_TXT" >/dev/null
+if [ "$WAVESHARE" = 1 ]; then
+  echo "1/5  Enabling SPI (Waveshare uses the hardware chip-select, CE0)..."
+  sudo raspi-config nonint do_spi 0
+  # spi0-0cs is the Inky's no-chip-select overlay; with it active the Waveshare
+  # panel receives nothing. Comment it out, never delete it.
+  if grep -q "^dtoverlay=spi0-0cs" "$CONFIG_TXT" 2>/dev/null; then
+    echo "     Commenting out dtoverlay=spi0-0cs in $CONFIG_TXT (Inky-only setting)..."
+    sudo sed -i 's/^dtoverlay=spi0-0cs/#dtoverlay=spi0-0cs/' "$CONFIG_TXT"
+    REBOOT_FOR_SPI=1
+  fi
+else
+  echo "1/5  Enabling SPI + I2C (Inky needs both; SPI with no chip-select)..."
+  sudo raspi-config nonint do_spi 0
+  sudo raspi-config nonint do_i2c 0
+  grep -q "^dtoverlay=spi0-0cs" "$CONFIG_TXT" || echo "dtoverlay=spi0-0cs" | sudo tee -a "$CONFIG_TXT" >/dev/null
+fi
 
 echo "2/5  Installing system packages (build tools to compile spidev, libatlas3-base for numpy)..."
 sudo apt-get update -qq
@@ -165,6 +196,10 @@ echo "3/5  Creating venv and installing Python deps..."
 python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements-frame.txt
+if [ "$WAVESHARE" = 1 ]; then
+  echo "     Installing the Waveshare driver dependencies..."
+  .venv/bin/pip install -q -r requirements-waveshare.txt
+fi
 if [ "$NEEDS_BROWSER" = 1 ]; then
   echo "     Installing Playwright + Chromium so the Pi can render the collage (a few minutes)..."
   .venv/bin/pip install -q playwright
@@ -193,6 +228,12 @@ timeout = 180        # a Zero 2 W needs ~70-120s to shoot the collage
 # basic_user = "..."
 # basic_pass = "..."
 CFG
+  if [ "$WAVESHARE" = 1 ]; then
+    {
+      printf '%s\n' '# Last hour by day, every bird since sunrise by night (see config.example.toml).'
+      printf '%s\n' 'schedule = "sun"'
+    } >> "$CONFIG"
+  fi
 elif [ "$MODE" = image ]; then
   BASE="$(printf '%s' "$IMAGE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')"
   # printf, not a heredoc: the URL is written literally, never shell-expanded.
@@ -226,6 +267,14 @@ else
     printf '%s\n' 'rotate = 90          # flip to 270 if the frame hangs the other way up'
     printf '%s\n' 'saturation = 0.6'
   } > "$CONFIG"
+fi
+
+if [ "$CONFIG_EXISTS" = 0 ] && [ "$WAVESHARE" = 1 ]; then
+  {
+    printf '%s\n' '# Waveshare 7.3" panel (800x480), written by install.sh --panel.'
+    printf 'panel = "%s"\n' "$PANEL"
+    printf '%s\n' 'opening = 0.98       # bare panel; 0.7071 keeps the A5 mat layout'
+  } >> "$CONFIG"
 fi
 
 sudo ln -sfn "$FRAME/birdframe-names" /usr/local/bin/birdframe-names
@@ -313,7 +362,11 @@ fi
 
 # SPI only takes effect on a reboot, so do it for the user. Skip if SPI is
 # already up (e.g. a re-run) so we don't bounce a working frame.
-if [ -e /dev/spidev0.0 ]; then
+if [ "$REBOOT_FOR_SPI" = 1 ]; then
+  echo "Rebooting so the SPI change takes effect (back on its own in ~1 min)..."
+  sleep 4
+  sudo reboot
+elif [ -e /dev/spidev0.0 ]; then
   echo "SPI already active, no reboot needed."
 else
   echo "Rebooting to bring SPI up (back on its own in ~1 min)..."
