@@ -52,6 +52,19 @@ quiet_start = 0        # 0/0 = always refresh on change; e.g. 22 and 6 mutes 22:
 quiet_end = 0
 heal_hours = 24        # force a refresh at least this often
 
+# --- Sun schedule (optional, needs shoot = true and the local mic) -----------
+# From sunrise to sunset show only the last day_hours; after sunset show every
+# bird since that morning's sunrise, until the next sunrise. Overrides `hours`
+# and `shoot_subtitle`. The timer still checks every 15 min and the panel only
+# redraws when the birds change; an empty window keeps the current image.
+# schedule = "sun"
+# latitude = 48.85       # default: LATITUDE / LONGITUDE from birdnet_conf
+# longitude = 2.35
+# birdnet_conf = "/etc/birdnet/birdnet.conf"
+# day_hours = 1
+# day_subtitle = "Dernière heure"
+# night_subtitle = "Aujourd'hui"
+
 # --- Paths ------------------------------------------------------------------
 state = "~/.birdframe/state.json"
 cache = "~/.birdframe"
