@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -28,6 +30,19 @@ jobs:
       - name: Install flake8
         run: pip install flake8
 
-      - name: Run Flake8 Lint
+      # Lint only the Python files this pull request adds or changes. The
+      # inherited codebase carries hundreds of findings that predate the fork;
+      # linting everything would keep every PR red regardless of its content.
+      - name: List changed Python files
+        id: changed
         run: |
-          flake8
+          git diff --name-only --diff-filter=ACMR \
+            "origin/${{ github.base_ref }}...HEAD" -- '*.py' \
+            | grep -v '^frame/waveshare_epd/' > changed.txt || true
+          echo "Changed Python files:"; cat changed.txt
+          echo "count=$(grep -c . changed.txt || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Flake8 Lint
+        if: steps.changed.outputs.count != '0'
+        run: |
+          xargs -r flake8 < changed.txt
