@@ -23,7 +23,7 @@ import statistics
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance
 
@@ -60,6 +60,11 @@ DEFAULTS = {
     "saturation": 0.6,
     "panel": "",            # "el133uf1" forces the 13.3" driver; "waveshare_7in3e" / "_7in3f" / "_7in3g" for Waveshare 7.3"
     "quiet_start": 0, "quiet_end": 0,    # 0/0 = no quiet hours
+    "schedule": "",         # "sun" = last day_hours by day, everything since sunrise by night
+    "latitude": None, "longitude": None,  # for schedule = "sun"; default: read birdnet_conf
+    "birdnet_conf": "/etc/birdnet/birdnet.conf",
+    "day_hours": 1,
+    "day_subtitle": "Dernière heure", "night_subtitle": "Aujourd'hui",
     "heal_hours": 24,
     "state": "~/.birdframe/state.json",
     "cache": "~/.birdframe",
@@ -422,6 +427,93 @@ def frame_url(url, bird_names):
     return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
 
 
+# --- sun schedule -----------------------------------------------------------
+def _conf_location(path):
+    """LATITUDE / LONGITUDE from the station's birdnet.conf (shell KEY=value)."""
+    found = {}
+    with open(os.path.expanduser(path)) as f:
+        for line in f:
+            key, sep, value = line.strip().partition("=")
+            if sep and key in ("LATITUDE", "LONGITUDE"):
+                found[key] = float(value.strip().strip("'\""))
+    return found["LATITUDE"], found["LONGITUDE"]
+
+
+def sun_location(cfg):
+    if cfg.get("latitude") is not None and cfg.get("longitude") is not None:
+        return float(cfg["latitude"]), float(cfg["longitude"])
+    return _conf_location(cfg["birdnet_conf"])
+
+
+def sun_window(now, lat, lon):
+    """Pick what to show at ``now`` (an aware datetime).
+
+    Daytime: the "day" phase. Night: the "night" phase, covering everything
+    since the latest sunrise, returned as ``since``.
+    """
+    from suntimes import sun_times
+    rise, sset = sun_times(now.date(), lat, lon)
+    if rise == "polar_day":
+        return "day", None
+    if sset == "polar_night":
+        return "night", now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if rise <= now < sset:
+        return "day", None
+    if now >= sset:
+        return "night", rise
+    prev, _ = sun_times(now.date() - timedelta(days=1), lat, lon)
+    if not isinstance(prev, datetime):  # yesterday had no sunrise: since midnight
+        prev = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return "night", prev
+
+
+def apply_sun_schedule(cfg, now):
+    """Return cfg with hours and subtitle set for the current sun phase.
+
+    The recent API takes whole hours, so the night window rounds up and may
+    start up to an hour before sunrise.
+    """
+    if cfg.get("species_source") == "birdweather" or not cfg["shoot"]:
+        print("schedule = \"sun\" needs shoot = true and the local mic; ignored", file=sys.stderr)
+        return cfg
+    phase, since = sun_window(now, *sun_location(cfg))
+    cfg = dict(cfg)
+    if phase == "day":
+        cfg["hours"] = int(cfg["day_hours"])
+        cfg["shoot_subtitle"] = cfg["day_subtitle"]
+    else:
+        cfg["hours"] = max(1, -(-int((now - since).total_seconds()) // 3600))
+        cfg["shoot_subtitle"] = cfg["night_subtitle"]
+    cfg["_schedule_scope"] = f"sun:{phase}"
+    print(f"schedule: {phase}, last {cfg['hours']}h")
+    return cfg
+
+
+def scheduled(cfg):
+    """cfg adjusted for the sun schedule, or unchanged when it is off or fails."""
+    if cfg.get("schedule") != "sun":
+        return cfg
+    try:
+        return apply_sun_schedule(cfg, datetime.now().astimezone())
+    except Exception as e:
+        print(f"schedule failed, using config as is: {e}", file=sys.stderr)
+        return cfg
+
+
+def skip_reason(cfg, changed, heal_due, species):
+    if not changed and not heal_due:
+        return "no change; skip"
+    if species == [] and "_schedule_scope" in cfg:
+        return "no birds in the window; keeping the current image"
+    return None
+
+
+def signature_scope(cfg):
+    if cfg.get("species_source") == "birdweather":
+        return birdweather_signature_scope(cfg)
+    return cfg.get("_schedule_scope", "")
+
+
 # --- run --------------------------------------------------------------------
 def obtain_image(cfg, species=None, *, capture=None):
     if cfg.get("species_source") == "birdweather":
@@ -458,14 +550,14 @@ def obtain_image(cfg, species=None, *, capture=None):
 
 def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     now = time.time()
+    cfg = scheduled(cfg)
     state = load_state(cfg["state"])
     sig = None
     species = None
     if use_signature:
         try:
             species = fetch_species(cfg, _auth(cfg))
-            scope = birdweather_signature_scope(cfg) if cfg.get("species_source") == "birdweather" else ""
-            sig = signature(species, scope)
+            sig = signature(species, signature_scope(cfg))
         except Exception as e:
             print(f"signature fetch failed: {e}", file=sys.stderr)  # treat as no change
     heal_due = now - state.get("last_refresh", 0) >= cfg["heal_hours"] * 3600
@@ -474,8 +566,9 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
         if in_quiet_hours(cfg, datetime.now().hour):
             print("quiet hours; skip")
             return
-        if not changed and not heal_due:
-            print("no change; skip")
+        reason = skip_reason(cfg, changed, heal_due, species)
+        if reason:
+            print(reason)
             return
         print("refresh:", "changed" if changed else "heal")
 
@@ -483,8 +576,7 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
         capture = {}
         img = fit_panel(obtain_image(cfg, species, capture=capture))
         if "species" in capture:
-            scope = birdweather_signature_scope(cfg) if cfg.get("species_source") == "birdweather" else ""
-            sig = signature(capture["species"], scope)
+            sig = signature(capture["species"], signature_scope(cfg))
     except Exception as e:
         print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
         return

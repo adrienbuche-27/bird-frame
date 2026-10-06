@@ -81,6 +81,8 @@ birdframe-names off
 
 Set `shoot_title = ""` in `~/.birdframe/config.toml` if you want to hide only the frame title.
 
+To follow the sun, add `schedule = "sun"` to `~/.birdframe/config.toml`. From sunrise to sunset the frame shows the birds of the last hour (`day_hours`); after sunset it shows every bird since that morning's sunrise, until the next sunrise. Sunrise and sunset come from the station's `LATITUDE` and `LONGITUDE` in `/etc/birdnet/birdnet.conf`, or from `latitude` and `longitude` in the frame config. The subtitle switches between `day_subtitle` and `night_subtitle`. When the window has no birds, the frame keeps its current image. This needs a local capture (`shoot = true`) from your own mic. If the mic has **Reset at midnight** enabled, the night view restarts at midnight.
+
 For an `--image-url` frame, the command adds `labels=1` or `labels=0` to the source URL. The source must honor that setting; otherwise its image will not change.
 
 When updating a paired mic and frame, update both. The frame waits for the mic's collage to finish loading before capturing it. An older mic frontend cannot confirm this, so the frame keeps its previous image and logs an update reminder. Capture now requires Pillow as well as Playwright, including standalone `shoot.py` use.
