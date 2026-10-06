@@ -72,7 +72,7 @@ Full guide: [`docs/custom-illustrations.md`](docs/custom-illustrations.md).
 
 ## Known gaps
 
-- **Re-running `install.sh` without `--panel`** adds `dtoverlay=spi0-0cs` back and breaks the Waveshare panel. Always pass `--panel`.
+- **Re-running `install.sh` without `--panel`** adds `dtoverlay=spi0-0cs` back and breaks the Waveshare panel. Always run `./install.sh --panel waveshare_7in3e` on this frame.
 - **`install.sh --panel` has not run on a Pi yet**, in particular installing `lgpio` from pip on Raspberry Pi OS.
 - **Tools → Pull latest** (`scripts/update_birdnet.sh`) refuses to run, because it only accepts upstream as `origin`. Update with `git pull`. Merging upstream changes is manual (`git fetch upstream && git merge upstream/avian-visitors`), and changes to `frame/display.py` or `frame/install.sh` may conflict.
 - **CI:** green on `main` since #8. `python-lint` lints only the Python files a PR changes, so editing an old file can still surface its inherited findings (about 425 across the codebase, e.g. C901 in `frame/shoot.py`). To run the browser capture tests locally, Playwright needs a matching Chromium; in a Claude cloud session use `FRAME_TEST_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. Without it the tests fail before running, which once looked like an upstream failure but was not.
