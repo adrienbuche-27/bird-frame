@@ -489,6 +489,25 @@ def apply_sun_schedule(cfg, now):
     return cfg
 
 
+def scheduled(cfg):
+    """cfg adjusted for the sun schedule, or unchanged when it is off or fails."""
+    if cfg.get("schedule") != "sun":
+        return cfg
+    try:
+        return apply_sun_schedule(cfg, datetime.now().astimezone())
+    except Exception as e:
+        print(f"schedule failed, using config as is: {e}", file=sys.stderr)
+        return cfg
+
+
+def skip_reason(cfg, changed, heal_due, species):
+    if not changed and not heal_due:
+        return "no change; skip"
+    if species == [] and "_schedule_scope" in cfg:
+        return "no birds in the window; keeping the current image"
+    return None
+
+
 def signature_scope(cfg):
     if cfg.get("species_source") == "birdweather":
         return birdweather_signature_scope(cfg)
@@ -531,11 +550,7 @@ def obtain_image(cfg, species=None, *, capture=None):
 
 def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     now = time.time()
-    if cfg.get("schedule") == "sun":
-        try:
-            cfg = apply_sun_schedule(cfg, datetime.now().astimezone())
-        except Exception as e:
-            print(f"schedule failed, using config as is: {e}", file=sys.stderr)
+    cfg = scheduled(cfg)
     state = load_state(cfg["state"])
     sig = None
     species = None
@@ -551,11 +566,9 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
         if in_quiet_hours(cfg, datetime.now().hour):
             print("quiet hours; skip")
             return
-        if not changed and not heal_due:
-            print("no change; skip")
-            return
-        if species == [] and "_schedule_scope" in cfg:
-            print("no birds in the window; keeping the current image")
+        reason = skip_reason(cfg, changed, heal_due, species)
+        if reason:
+            print(reason)
             return
         print("refresh:", "changed" if changed else "heal")
 
