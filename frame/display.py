@@ -25,7 +25,7 @@ import time
 import urllib.request
 from datetime import datetime
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance
 
 try:
     import tomllib
@@ -58,7 +58,7 @@ DEFAULTS = {
     "opening": 0.7071,      # opening height as a panel fraction; 0.7071 preserves A5
     "rotate": 90,           # 90 or 270 if the frame hangs the other way up
     "saturation": 0.6,
-    "panel": "",            # "el133uf1" forces the 13.3" driver if auto() fails
+    "panel": "",            # "el133uf1" forces the 13.3" driver; "waveshare_7in3e" / "_7in3f" / "_7in3g" for Waveshare 7.3"
     "quiet_start": 0, "quiet_end": 0,    # 0/0 = no quiet hours
     "heal_hours": 24,
     "state": "~/.birdframe/state.json",
@@ -296,12 +296,81 @@ def _draw_mat_box(img, opening):
 
 
 # --- hardware ---------------------------------------------------------------
+# Waveshare 7.3" panels (800x480). These have no ID EEPROM, so the Inky
+# library cannot detect them; pick one with `panel = "..."` in the config.
+#   waveshare_7in3e  7.3inch e-Paper (E), 6-colour Spectra 6
+#   waveshare_7in3f  7.3inch e-Paper (F), 7-colour ACeP
+#   waveshare_7in3g  7.3inch e-Paper (G), 4-colour
+WAVESHARE = {"waveshare_7in3e": "epd7in3e", "waveshare_7in3f": "epd7in3f",
+             "waveshare_7in3g": "epd7in3g"}
+
+
+def _fit_aspect(img, tw, th):
+    """Match a panel of another shape without stretching: trim spare paper
+    when the content allows it, otherwise pad with paper, then resize."""
+    w, h = img.size
+    paper = _paper(img)
+    diff = ImageChops.difference(img, Image.new("RGB", img.size, paper))
+    bb = diff.convert("L").point(lambda p: 255 if p > 34 else 0).getbbox() or (0, 0, w, h)
+    if w * th > h * tw:        # too wide for the panel
+        cw = round(h * tw / th)
+        x0 = (w - cw) // 2
+        if bb[0] >= x0 and bb[2] <= x0 + cw:
+            img = img.crop((x0, 0, x0 + cw, h))
+        else:
+            nh = round(w * th / tw)
+            canvas = Image.new("RGB", (w, nh), paper)
+            canvas.paste(img, (0, (nh - h) // 2))
+            img = canvas
+    elif w * th < h * tw:      # too tall for the panel
+        ch = round(w * th / tw)
+        y0 = (h - ch) // 2
+        if bb[1] >= y0 and bb[3] <= y0 + ch:
+            img = img.crop((0, y0, w, y0 + ch))
+        else:
+            nw = round(h * tw / th)
+            canvas = Image.new("RGB", (nw, h), paper)
+            canvas.paste(img, ((nw - w) // 2, 0))
+            img = canvas
+    return img.resize((tw, th), Image.LANCZOS)
+
+
+def _prep_waveshare(img, saturation):
+    """The Waveshare driver dithers to pure inks. Lift the cream paper to
+    white first so the background stays clean instead of speckled, then
+    boost colour, which these panels render paler than a screen does."""
+    paper = _paper(img)
+    if min(paper) >= 180:
+        img = Image.merge("RGB", [c.point(lambda v, p=p: min(255, round(v * 255 / p)))
+                                  for c, p in zip(img.split(), paper)])
+    return ImageEnhance.Color(img).enhance(1 + max(0.0, float(saturation)))
+
+
+def push_waveshare(img, rotate, saturation, panel):
+    import importlib
+    try:
+        epd = importlib.import_module(f"waveshare_epd.{WAVESHARE[panel]}").EPD()
+    except ModuleNotFoundError as e:
+        raise RuntimeError(f"Waveshare driver not installed ({e}); put the waveshare_epd "
+                           "folder next to display.py and pip install gpiozero lgpio spidev") from e
+    buf = _fit_aspect(img.rotate(rotate, expand=True), epd.width, epd.height)
+    buf = _prep_waveshare(buf, saturation)
+    if epd.init() == -1:
+        raise RuntimeError("Waveshare panel did not initialise (check SPI and the HAT seating)")
+    try:
+        epd.display(epd.getbuffer(buf))
+    finally:
+        epd.sleep()   # never leave an e-paper panel powered between refreshes
+
+
 def push_panel(img, rotate, saturation, panel=""):
     """Rotate to the panel's landscape buffer and push. Lazy import so this
     module still loads on a machine without the Inky library."""
     if rotate not in (90, 270):
         print(f"rotate must be 90 or 270, not {rotate}; using 90", file=sys.stderr)
         rotate = 90
+    if panel in WAVESHARE:
+        return push_waveshare(img, rotate, saturation, panel)
     if panel == "el133uf1":
         from inky.inky_el133uf1 import Inky
         dev = Inky(resolution=(1600, 1200))
