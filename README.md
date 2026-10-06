@@ -132,6 +132,8 @@ On a Pi with 4 GB of RAM or less, add `--model u2net` to the `cutout.py` command
 
 Filter to your region with `--ebird-region US-CA` (needs `EBIRD_API_KEY`). The full pipeline, prompt, reference images, and per-species tuning live in [`avian/scripts/README.md`](avian/scripts/README.md). Style lives in [`prompt.template.md`](avian/scripts/prompt.template.md).
 
+To add your own species and keep them in your fork (masks, what to commit, what Git ignores), see [adding your own illustrations](docs/custom-illustrations.md).
+
 See [illustration bundles](illustration-bundles.md) for pregenerated bundles shared by other folks in the community, or share your own for others to use!
 
 ---
