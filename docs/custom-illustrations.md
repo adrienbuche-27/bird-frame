@@ -166,8 +166,14 @@ What it does:
 5. Runs `build_masks.py --add` for those birds on the Pi, then removes them
    from `cuts.json`.
 
-It ends with `done: N upgraded`. Hard-refresh the collage to see the new
-edges.
+Each step prints a timestamped line, and each bird a counter with its time
+and an estimate of what is left, e.g. `[3/18] pica-pica [ok] 24s, ~6m00s left`.
+Add `--verbose` (`-v`) to also see download sizes, fetch and matting times,
+and the command run on the Pi.
+
+It ends with `done: N upgraded in <time>`, and lists any bird that failed
+and will be retried on the next run. Hard-refresh the collage to see the
+new edges.
 
 ### Commit the result
 

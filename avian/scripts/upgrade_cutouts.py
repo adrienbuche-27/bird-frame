@@ -11,6 +11,7 @@ clear as birds are upgraded, which also clears the menu notification.
 
 Usage:
     python3 upgrade_cutouts.py --pi <user>@birdnet.local
+    python3 upgrade_cutouts.py --pi <user>@birdnet.local --verbose   # per-step detail
 
 Needs:  pip install rembg onnxruntime scipy pillow numpy
 The first run downloads the BiRefNet model (~1GB) to ~/.u2net/.
@@ -23,6 +24,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 CREAM_TOL = 11   # near-paper distance (matches the repo cutout pipeline)
@@ -85,6 +87,27 @@ def birefnet_cut(src: Path, dst: Path, sess) -> None:
     Image.fromarray(rgba[y0:y1, x0:x1], "RGBA").save(dst)
 
 
+_VERBOSE = False
+
+
+def log(msg: str, *, detail: bool = False) -> None:
+    """Timestamped progress line, flushed so it shows while the run is going."""
+    if detail and not _VERBOSE:
+        return
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def fmt_duration(seconds: float) -> str:
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
 def validate_target(value: str) -> str:
     if not PI_TARGET_RE.fullmatch(value):
         raise ValueError("--pi must be a safe user@host target")
@@ -121,6 +144,37 @@ def read_remote(pi: str, path: str) -> bytes:
     return result.stdout
 
 
+def cut_all(pi: str, base: str, slugs: list, sess, tmp: Path) -> tuple:
+    """Fetch and re-cut each bird, logging progress and a time estimate."""
+    done, failed = [], []
+    cut_started = time.monotonic()
+    for i, slug in enumerate(slugs, 1):
+        tag = f"[{i}/{len(slugs)}] {slug}"
+        t0 = time.monotonic()
+        try:
+            log(f"    {tag}: fetching raw/{slug}.png...", detail=True)
+            raw = read_remote(pi, f"{base}/raw/{slug}.png")
+            src = tmp / f"{slug}.raw.png"
+            src.write_bytes(raw)
+            fetched = time.monotonic()
+            log(f"    {tag}: {len(raw) / 1e6:.1f} MB in {fmt_duration(fetched - t0)}; matting...", detail=True)
+            out = tmp / f"{slug}.png"
+            birefnet_cut(src, out, sess)
+            log(f"    {tag}: matted in {fmt_duration(time.monotonic() - fetched)}, "
+                f"{out.stat().st_size / 1e6:.1f} MB", detail=True)
+            done.append(slug)
+            status = "[ok]"
+        except Exception as e:
+            failed.append(slug)
+            print(f"  [fail] {slug}: {e}", file=sys.stderr, flush=True)
+            status = "[fail]"
+        elapsed = time.monotonic() - cut_started
+        left = len(slugs) - i
+        eta = f", ~{fmt_duration(elapsed / i * left)} left" if left else ""
+        log(f"    {tag} {status} {fmt_duration(time.monotonic() - t0)}{eta}")
+    return done, failed
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -128,7 +182,12 @@ def main() -> int:
                     help="ssh target for the Pi (e.g. pi@birdnet.local)")
     ap.add_argument("--repo", default="BirdNET-Pi",
                     help="repo dir on the Pi, relative to its $HOME (default BirdNET-Pi)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="also print sizes, timings and remote commands for each step")
     args = ap.parse_args()
+    global _VERBOSE
+    _VERBOSE = args.verbose
+    started = time.monotonic()
 
     try:
         pi = validate_target(args.pi)
@@ -147,6 +206,7 @@ def main() -> int:
               "    pip install rembg onnxruntime scipy pillow numpy", file=sys.stderr)
         return 2
 
+    log(f"1/5 reading {base}/cuts.json on {host}...")
     try:
         cuts = json.loads(read_remote(pi, f"{base}/cuts.json"))
         if not isinstance(cuts, dict):
@@ -158,25 +218,17 @@ def main() -> int:
     if not slugs:
         print("nothing to upgrade - no instant cutouts recorded")
         return 0
-    print(f"{len(slugs)} instant cutout(s) to upgrade: {', '.join(slugs)}")
+    log(f"    {len(slugs)} instant cutout(s) to upgrade: {', '.join(slugs)}")
 
+    log("2/5 loading the BiRefNet model (the first run downloads ~1 GB into ~/.u2net/)...")
+    t0 = time.monotonic()
     from rembg import new_session
     sess = new_session("birefnet-general")
+    log(f"    model ready in {fmt_duration(time.monotonic() - t0)}")
 
     tmp = Path(tempfile.mkdtemp(prefix="av-upgrade-"))
-    done, failed = [], []
-    for slug in slugs:
-        try:
-            raw = read_remote(pi, f"{base}/raw/{slug}.png")
-            src = tmp / f"{slug}.raw.png"
-            src.write_bytes(raw)
-            out = tmp / f"{slug}.png"
-            birefnet_cut(src, out, sess)
-            done.append(slug)
-            print(f"  [ok] {slug}")
-        except Exception as e:
-            failed.append(slug)
-            print(f"  [fail] {slug}: {e}", file=sys.stderr)
+    log(f"3/5 cutting {len(slugs)} bird(s) with BiRefNet (work dir {tmp})...")
+    done, failed = cut_all(pi, base, slugs, sess, tmp)
     if not done:
         print("nothing upgraded", file=sys.stderr)
         return 1
@@ -191,7 +243,7 @@ def main() -> int:
         cuts.pop(s, None)
     cj = tmp / "cuts.json"
     cj.write_text(json.dumps(cuts, indent=0, sort_keys=True) + "\n")
-    print(f"pushing {len(done)} cutout(s) to {args.pi}:{stage}/")
+    log(f"4/5 pushing {len(done)} cutout(s) to {args.pi}:{stage}/...")
     if subprocess.run(["ssh", pi, f"mkdir -p -- {shlex.quote(stage)}"]).returncode != 0:
         print("error: ssh mkdir failed", file=sys.stderr)
         return 1
@@ -206,12 +258,17 @@ def main() -> int:
               f" && $P avian/scripts/build_masks.py --add {' '.join(shlex.quote(s) for s in done)}"
               f" && mv -f avian/assets/illustrations/.upgrade-stage/cuts.json avian/assets/illustrations/"
               f" && rmdir avian/assets/illustrations/.upgrade-stage")
+    log("5/5 installing on the Pi and rebuilding their masks...")
+    log(f"    ssh {pi} {remote}", detail=True)
     if subprocess.run(["ssh", pi, remote]).returncode != 0:
         print("error: remote install failed (staged files remain in .upgrade-stage; rerun after fixing)",
               file=sys.stderr)
         return 1
 
-    print(f"done: {len(done)} upgraded" + (f", {len(failed)} failed" if failed else ""))
+    log(f"done: {len(done)} upgraded" + (f", {len(failed)} failed" if failed else "")
+        + f" in {fmt_duration(time.monotonic() - started)}")
+    if failed:
+        log(f"    still in cuts.json, retried next run: {', '.join(failed)}")
     print("hard-refresh the collage (or wait for the next poll) to see the new edges")
     return 0
 
