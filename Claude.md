@@ -13,7 +13,7 @@ Context for continuing work on this repo: what the project is, how the owner's s
 
 - **One Pi does both jobs:** `traffic-pi`, user `abuche`. It runs the BirdNET-Pi station and the frame service. The checkout is `~/BirdNET-Pi` (the name BirdNET-Pi uses; it is this repo).
 - **Remotes on the Pi:** `origin` = `adrienbuche-27/bird-frame` (this fork), `upstream` = `Twarner491/AvianVisitors`. The fetch refspec was fixed to `+refs/heads/*:refs/remotes/origin/*` and `main` tracks `origin/main`, so a plain `git pull` works.
-- **Panel:** Waveshare 7.3" e-Paper HAT (800x480), not upstream's Pimoroni Inky Impression 13.3" (1600x1200). The exact variant, (E), (F) or (G), is whatever `panel` is set to in the live config; confirm with the owner. Only that variant has been tested on hardware.
+- **Panel:** Waveshare 7.3" e-Paper HAT (800x480), not upstream's Pimoroni Inky Impression 13.3" (1600x1200). The variant is **(E)**, the 6-colour Spectra 6 panel, so the live config has `panel = "waveshare_7in3e"` and the driver module is `waveshare_epd/epd7in3e.py`. Only (E) has been tested on hardware; the (F) and (G) paths are untested.
 - **Boot config:** `dtoverlay=spi0-0cs` is commented out in `/boot/firmware/config.txt`. That overlay is for the Inky, which has no chip-select line; the Waveshare driver needs the hardware chip-select (CE0, GPIO 8).
 - **Illustrations:** the owner is in Europe. About 80 European species (perched and flight poses, about 160 images) were added on top of the bundled North American set. New species are generated one at a time with the Atlas **generate** button, by choice: bulk generation through `pregen.py` cost too much on Gemini. Do not propose automatic generation without asking.
 
@@ -42,7 +42,7 @@ The config lives outside the repo at `~/.birdframe/config.toml`. Keys that matte
 |---|---|---|
 | `base_url` | `http://<station address>` | Must include `http://`; a bare IP fails with "unknown url type". |
 | `shoot` | `true` | The Pi renders the collage itself (local mode). |
-| `panel` | `waveshare_7in3e`, `_7in3f` or `_7in3g` | Without it, the Inky auto-detect runs and fails. |
+| `panel` | `waveshare_7in3e` | Variant (E). Without it, the Inky auto-detect runs and fails. |
 | `opening` | `0.98` | Fills the bare panel; the default 0.7071 is for upstream's A5 mat. |
 | `rotate` | 90 or 270 | Which way up the frame hangs. |
 | `saturation` | default 0.6 | On Waveshare this is a colour boost before dithering. |
