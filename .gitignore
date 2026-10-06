@@ -76,3 +76,14 @@ avian/assets/_legacy/
 # to whatever hardware happened to produce them.
 tflite_runtime-*.whl
 requirements_custom.txt
+
+# --- Station-local illustration work files ---
+# Written by the on-Pi generate path (generate.php / generate_one.py). The
+# finished PNGs, cuts.json, masks.json and dims.json are committed; these are
+# logs, rate-limit state and the raw cream-ground renders that
+# upgrade_cutouts.py reads back over SSH. See docs/custom-illustrations.md.
+avian/assets/illustrations/.generate.*
+avian/assets/illustrations/.upgrade-stage/
+avian/assets/illustrations/raw/
+# Symlink to model/labels_nm/labels_en.txt, made by install_services.sh
+model/labels_flickr.txt
