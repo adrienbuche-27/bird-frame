@@ -12967,6 +12967,10 @@
       fieldMap = L.map(host, { worldCopyJump: true }).setView([20, 0], 2);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
+        // The site sends no Referer (index.html, Caddy), but OpenStreetMap's
+        // tile servers refuse requests without one (their usage policy). The
+        // tiles alone send this station's origin, never the page's path.
+        referrerPolicy: 'strict-origin-when-cross-origin',
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
       }).addTo(fieldMap);
       fieldMarkers = L.layerGroup().addTo(fieldMap);

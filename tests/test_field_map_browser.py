@@ -107,7 +107,12 @@ def open_field_page(browser, site, calls):
     page.route("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
                lambda r: r.fulfill(body=(LEAFLET / "leaflet.css").read_bytes(), content_type="text/css",
                                    headers={"Access-Control-Allow-Origin": "*"}))
-    page.route("https://tile.openstreetmap.org/**", lambda r: r.fulfill(body=tile, content_type="image/png"))
+
+    def tile_route(route):
+        state.setdefault("tile_referers", []).append(route.request.headers.get("referer"))
+        route.fulfill(body=tile, content_type="image/png")
+
+    page.route("https://tile.openstreetmap.org/**", tile_route)
     page.goto(site + "#admin=field")
     page.wait_for_selector(".field-map.leaflet-container", timeout=15000)
     return page, state
@@ -134,6 +139,16 @@ def test_map_lists_and_shows_recordings(browser, site):
 
     items.nth(1).click()
     assert "could not decode audio" in page.inner_text("#fieldDetail")
+
+
+def test_tiles_send_the_origin_osm_requires(browser, site):
+    # The site is no-referrer, but tile.openstreetmap.org blocks requests
+    # without a Referer. Tiles alone send the origin, not the page path.
+    page, state = open_field_page(browser, site, [])
+    page.wait_for_selector(".leaflet-tile")
+    referers = state.get("tile_referers")
+    assert referers and all(r == site for r in referers), referers
+    assert page.locator(".leaflet-tile").first.get_attribute("referrerpolicy") == "strict-origin-when-cross-origin"
 
 
 def test_upload_in_chunks_after_picking_a_spot(browser, site, tmp_path):
