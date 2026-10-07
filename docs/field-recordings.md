@@ -15,9 +15,8 @@ Field recordings are kept apart from the station:
 - they never enter `birds.db`, so the collage, the statistics and the e-ink
   frame only ever show what the station's own microphone heard.
 
-> **Status.** This is part A: storage, upload API and analysis. The map tab
-> with the upload form (part B) and the field-recording stamps (part C) come
-> next. Until then, add recordings from the command line (below).
+> **Status.** Parts A (storage, upload API, analysis) and B (the map page)
+> are done. Field-recording stamps in the Atlas (part C) come next.
 
 ---
 
@@ -41,6 +40,38 @@ sudo /usr/local/sbin/avian-caddy-refresh
 **Tools → Pull latest** does not work on this fork (see
 [custom illustrations](custom-illustrations.md#notes)), which is why the Caddy
 helper is installed by hand.
+
+---
+
+## The map page
+
+Open the menu, then **map** (it is an admin page, at `/#admin=field`).
+
+- **The map** shows one dot per recording; a red dot is one whose analysis
+  failed. Click a dot, or a recording in the list, to open it.
+- **Add a recording**: choose the audio file, click the map where it was
+  recorded (an orange ring marks the spot), optionally name the place and
+  set the date, then **upload and analyse**. The file is sent in pieces with
+  a progress percentage; the analysis then runs in the background and the
+  page refreshes by itself until it is done.
+- **Leave the date empty** to read it from the file. Correct it afterwards
+  if needed.
+- **A recording** shows its place, date, position and length, an audio
+  player, and the birds found with their illustration, best confidence and
+  number of detections. Under **correct place or date** you can rename it,
+  change its date, or **move it on the map** (click the button, then the new
+  spot). Changing the date or position analyses it again. **Analyse again**
+  and **delete** are below.
+
+**Use my position** needs a secure page. Browsers only share the location
+with `https://` sites (or `localhost`), and the station is usually opened as
+`http://<address>` on the home network, so the button is greyed out there:
+click the map instead. Behind an HTTPS setup (see
+[`avian/forwarding/`](../avian/forwarding/)) it works.
+
+The map library (Leaflet, pinned and checked with a hash) and the map tiles
+come from the internet (unpkg.com and openstreetmap.org), and only when this
+page is open. Without internet the page says so; uploads still work.
 
 ---
 
@@ -89,7 +120,7 @@ while uploads through the API are analysed in the background.
 
 ## The upload API
 
-`avian/api/field.php`, used by the upcoming map tab. Every action requires the
+`avian/api/field.php`, used by the map page. Every action requires the
 station admin, since recordings reveal where you have been. POST actions take
 a JSON body and need the `X-Avian-Action: 1` header, like the other admin APIs.
 

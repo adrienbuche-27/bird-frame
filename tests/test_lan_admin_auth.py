@@ -415,11 +415,14 @@ class LanAdminAuthStaticTests(unittest.TestCase):
         items = payload["items"]
         self.assertEqual(
             [item["label"] for item in items],
-            ["settings", "system", "logs", "tools"],
+            ["settings", "system", "logs", "tools", "map"],
         )
         self.assertTrue(all(item["native"] is True for item in items))
-        self.assertTrue(all("full" not in item for item in items))
-        self.assertEqual(items[-1]["href"], "/#admin=tools")
+        self.assertTrue(all("full" not in item for item in items[:4]))
+        self.assertEqual(items[3]["href"], "/#admin=tools")
+        # Field recordings: one full-width entry after the four base items.
+        self.assertEqual(items[-1]["href"], "/#admin=field")
+        self.assertIs(items[-1]["full"], True)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_auth_runtime_suite(self):

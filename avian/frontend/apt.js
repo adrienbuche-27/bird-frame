@@ -11618,6 +11618,7 @@
     logs: 'Logs',
     tools: 'Tools',
     educators: 'Educators',
+    field: 'Field recordings',
   };
   function syncAdminTitlePin() {
     adminTitleFrame = 0;
@@ -11724,6 +11725,7 @@
       educatorFolderComposerOpen = false;
       educatorLiveWide = false;
     }
+    if (adminSect === 'field' && section !== 'field') destroyFieldMap();
     adminViewGeneration += 1;
     document.body.classList.add('admin-on');
     adminEl.inert = false;
@@ -11740,6 +11742,7 @@
     else if (section === 'logs') renderAdminLogs();
     else if (section === 'tools') renderAdminTools();
     else if (section === 'educators') renderAdminEducators();
+    else if (section === 'field') renderAdminField();
     else adminBody.innerHTML = adminUnreachableHtml('unknown admin section');
     if (section === 'educators' && educatorAdminRouteFocus) {
       educatorAdminRouteFocus = false;
@@ -11778,6 +11781,7 @@
       educatorFolderComposerOpen = false;
       educatorLiveWide = false;
     }
+    if (previousAdminSect === 'field') destroyFieldMap();
     adminViewGeneration += 1;
     document.body.classList.remove('admin-on');
     if (options.focusPublicEducator) focusPublicEducatorDestination();
@@ -12827,6 +12831,392 @@
     if (error) link.setAttribute('data-error', '1');
     else link.removeAttribute('data-error');
   }
+  // ---- Field recordings (#admin=field) ----
+  // Audio recorded away from the station, analysed by avian/api/field.php
+  // for the place and day it was recorded. Admin-only: the map shows where
+  // the owner has been. Leaflet and the OpenStreetMap tiles load only when
+  // this page opens, so the rest of the site never contacts a third party.
+  var FIELD_API = './avian/api/field.php';
+  var LEAFLET = {
+    js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+    jsIntegrity: 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH',
+    css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+    cssIntegrity: 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H',
+  };
+  var leafletLoading = null;
+  var fieldMap = null;
+  var fieldMarkers = null;
+  var fieldDraft = null;          // {lat, lon} picked for the next upload
+  var fieldDraftMarker = null;
+  var fieldRecordings = [];
+  var fieldSelected = null;       // id of the recording shown in the panel
+  var fieldPickFor = null;        // 'upload' or a recording id being moved
+  var fieldBusy = false;
+
+  function loadLeaflet() {
+    if (window.L && window.L.map) return Promise.resolve(window.L);
+    if (leafletLoading) return leafletLoading;
+    leafletLoading = new Promise(function (resolve, reject) {
+      if (!document.querySelector('link[data-leaflet]')) {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = LEAFLET.css;
+        link.integrity = LEAFLET.cssIntegrity;
+        link.crossOrigin = 'anonymous';
+        link.setAttribute('data-leaflet', '');
+        document.head.appendChild(link);
+      }
+      var script = document.createElement('script');
+      script.src = LEAFLET.js;
+      script.integrity = LEAFLET.jsIntegrity;
+      script.crossOrigin = 'anonymous';
+      script.onload = function () { window.L ? resolve(window.L) : reject(new Error('map library missing')); };
+      script.onerror = function () {
+        leafletLoading = null;
+        script.remove();
+        reject(new Error('map library unavailable (no internet?)'));
+      };
+      document.head.appendChild(script);
+    });
+    return leafletLoading;
+  }
+
+  function destroyFieldMap() {
+    if (fieldMap) { fieldMap.remove(); }
+    fieldMap = null;
+    fieldMarkers = null;
+    fieldDraftMarker = null;
+    fieldPickFor = null;
+  }
+
+  function fieldPost(action, body) {
+    return adminFetch(FIELD_API + '?action=' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Avian-Action': '1' },
+      body: JSON.stringify(body),
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (json) {
+        if (!response.ok || !json.ok) throw new Error(json.error || ('HTTP ' + response.status));
+        return json;
+      });
+    });
+  }
+
+  function fieldWhen(iso) {
+    if (!iso) return 'date unknown';
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function fieldCoords(lat, lon) {
+    return (+lat).toFixed(5) + ', ' + (+lon).toFixed(5);
+  }
+  function fieldTitle(rec) {
+    return rec.place || fieldCoords(rec.lat, rec.lon);
+  }
+  var FIELD_STATUS = {
+    queued: 'waiting', analyzing: 'analysing', done: 'done', error: 'error',
+  };
+
+  function renderAdminField() {
+    destroyFieldMap();
+    fieldSelected = null;
+    fieldDraft = null;
+    var secure = window.isSecureContext && navigator.geolocation;
+    adminBody.innerHTML = ''
+      + '<div class="field-page">'
+      + '<div class="field-map" id="fieldMap" role="region" aria-label="Map of field recordings">'
+      + '<p class="field-map-note">loading the map...</p></div>'
+      + '<p class="field-map-hint" id="fieldMapHint">click the map to place a new recording</p>'
+      + '<div class="field-columns">'
+      + '<form class="field-upload" id="fieldUpload" novalidate>'
+      + '<h2 class="admin-section-head">add a recording</h2>'
+      + '<label class="field-label">audio file'
+      + '<input type="file" id="fieldFile" accept="audio/*,.m4a,.opus,.amr,.3gp" required></label>'
+      + '<label class="field-label">place <span class="field-opt">optional</span>'
+      + '<input type="text" id="fieldPlace" maxlength="120" placeholder="e.g. Bois de Vincennes"></label>'
+      + '<label class="field-label">recorded <span class="field-opt">optional, read from the file if empty</span>'
+      + '<input type="datetime-local" id="fieldWhen"></label>'
+      + '<div class="field-label">position'
+      + '<div class="field-pos"><span id="fieldPos">click the map</span>'
+      + '<button type="button" class="field-btn" id="fieldLocate"' + (secure ? '' : ' disabled title="needs a secure (https) page"') + '>use my position</button>'
+      + '</div></div>'
+      + '<button type="submit" class="field-btn primary" id="fieldSend">upload and analyse</button>'
+      + '<p class="field-status" id="fieldUploadStatus" role="status" aria-live="polite"></p>'
+      + '</form>'
+      + '<div class="field-side">'
+      + '<div class="field-detail" id="fieldDetail" hidden></div>'
+      + '<h2 class="admin-section-head">recordings</h2>'
+      + '<ul class="field-list" id="fieldList"><li class="field-empty">loading...</li></ul>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+
+    var generation = adminViewGeneration;
+    document.getElementById('fieldUpload').addEventListener('submit', fieldUpload);
+    document.getElementById('fieldLocate').addEventListener('click', fieldLocate);
+    document.getElementById('fieldList').addEventListener('click', function (event) {
+      var item = event.target.closest('[data-field-id]');
+      if (item) fieldSelect(+item.getAttribute('data-field-id'), true);
+    });
+
+    loadLeaflet().then(function (L) {
+      if (generation !== adminViewGeneration || adminSect !== 'field') return;
+      var host = document.getElementById('fieldMap');
+      host.innerHTML = '';
+      fieldMap = L.map(host, { worldCopyJump: true }).setView([20, 0], 2);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+      }).addTo(fieldMap);
+      fieldMarkers = L.layerGroup().addTo(fieldMap);
+      fieldMap.on('click', function (event) { fieldPick(event.latlng.lat, event.latlng.lng); });
+      fieldDrawMarkers(true);
+    }).catch(function (error) {
+      var host = document.getElementById('fieldMap');
+      if (host) host.innerHTML = '<p class="field-map-note">' + adminEsc(error.message)
+        + '. Recordings still upload; enter the position from the list below once the map is back.</p>';
+    });
+    fieldRefresh();
+  }
+
+  function fieldRefresh() {
+    var generation = adminViewGeneration;
+    return adminFetch(FIELD_API + '?action=list').then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (json) {
+        if (!response.ok || !json.ok) throw new Error(json.error || ('HTTP ' + response.status));
+        return json;
+      });
+    }).then(function (json) {
+      if (generation !== adminViewGeneration || adminSect !== 'field') return;
+      var first = !fieldRecordings.length;
+      fieldRecordings = json.recordings || [];
+      fieldRenderList();
+      fieldDrawMarkers(first);
+      fieldRenderDetail();
+      var pending = fieldRecordings.some(function (r) { return r.status === 'queued' || r.status === 'analyzing'; });
+      if (pending && !adminPollT) adminPollT = setInterval(fieldRefresh, 4000);
+      if (!pending && adminPollT) { clearInterval(adminPollT); adminPollT = null; }
+    }).catch(function (error) {
+      if (adminAuthCancelled(error)) return;
+      var list = document.getElementById('fieldList');
+      if (list) list.innerHTML = '<li class="field-empty">' + adminEsc(error.message) + '</li>';
+    });
+  }
+
+  function fieldRenderList() {
+    var list = document.getElementById('fieldList');
+    if (!list) return;
+    if (!fieldRecordings.length) {
+      list.innerHTML = '<li class="field-empty">no recordings yet</li>';
+      return;
+    }
+    list.innerHTML = fieldRecordings.map(function (rec) {
+      var names = rec.species.slice(0, 3).map(function (s) { return s.com; }).join(', ');
+      if (rec.species.length > 3) names += ' +' + (rec.species.length - 3);
+      if (rec.status === 'done' && !rec.species.length) names = 'no bird found';
+      return '<li><button type="button" class="field-item' + (rec.id === fieldSelected ? ' on' : '') + '" data-field-id="' + rec.id + '">'
+        + '<span class="field-item-head"><b>' + adminEsc(fieldTitle(rec)) + '</b>'
+        + '<i class="field-chip ' + adminAttr(rec.status) + '">' + adminEsc(FIELD_STATUS[rec.status] || rec.status) + '</i></span>'
+        + '<span class="field-item-sub">' + adminEsc(fieldWhen(rec.recorded_at)) + (names ? ' · ' + adminEsc(names) : '') + '</span>'
+        + '</button></li>';
+    }).join('');
+  }
+
+  function fieldDrawMarkers(fit) {
+    if (!fieldMap || !fieldMarkers) return;
+    fieldMarkers.clearLayers();
+    var L = window.L;
+    var bounds = [];
+    fieldRecordings.forEach(function (rec) {
+      var on = rec.id === fieldSelected;
+      L.circleMarker([rec.lat, rec.lon], {
+        radius: on ? 10 : 7, weight: 2, color: '#fcfcfb',
+        fillColor: rec.status === 'error' ? '#9b3f37' : '#4a3f31', fillOpacity: 0.9,
+      }).bindTooltip(fieldTitle(rec)).on('click', function (event) {
+        L.DomEvent.stopPropagation(event);
+        fieldSelect(rec.id, false);
+      }).addTo(fieldMarkers);
+      bounds.push([rec.lat, rec.lon]);
+    });
+    if (fieldDraft) {
+      fieldDraftMarker = L.circleMarker([fieldDraft.lat, fieldDraft.lon], {
+        radius: 9, weight: 3, color: '#c9862b', fillColor: '#c9862b', fillOpacity: 0.35,
+      }).bindTooltip('new recording').addTo(fieldMarkers);
+    }
+    if (fit && bounds.length) fieldMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+  }
+
+  function fieldPick(lat, lon) {
+    if (typeof fieldPickFor === 'number') {
+      var id = fieldPickFor;
+      fieldPickFor = null;
+      fieldSetHint('');
+      fieldPost('update', { id: id, lat: +lat.toFixed(6), lon: +lon.toFixed(6) })
+        .then(fieldRefresh)
+        .catch(function (error) { if (!adminAuthCancelled(error)) fieldSetHint(error.message); });
+      return;
+    }
+    fieldDraft = { lat: +lat.toFixed(6), lon: +lon.toFixed(6) };
+    var pos = document.getElementById('fieldPos');
+    if (pos) pos.textContent = fieldCoords(fieldDraft.lat, fieldDraft.lon);
+    fieldDrawMarkers(false);
+  }
+
+  function fieldSetHint(text) {
+    var hint = document.getElementById('fieldMapHint');
+    if (hint) hint.textContent = text || 'click the map to place a new recording';
+  }
+
+  function fieldLocate() {
+    var status = document.getElementById('fieldUploadStatus');
+    navigator.geolocation.getCurrentPosition(function (position) {
+      fieldPick(position.coords.latitude, position.coords.longitude);
+      if (fieldMap) fieldMap.setView([fieldDraft.lat, fieldDraft.lon], 14);
+    }, function (error) {
+      if (status) status.textContent = 'position unavailable: ' + error.message;
+    }, { enableHighAccuracy: true, timeout: 15000 });
+  }
+
+  function fieldReadChunk(file, start, size) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result).replace(/^data:[^,]*,/, '')); };
+      reader.onerror = function () { reject(reader.error || new Error('could not read the file')); };
+      reader.readAsDataURL(file.slice(start, start + size));
+    });
+  }
+
+  function fieldUpload(event) {
+    event.preventDefault();
+    if (fieldBusy) return;
+    var file = document.getElementById('fieldFile').files[0];
+    var status = document.getElementById('fieldUploadStatus');
+    var button = document.getElementById('fieldSend');
+    if (!file) { status.textContent = 'choose an audio file first'; return; }
+    if (!fieldDraft) { status.textContent = 'click the map where it was recorded'; return; }
+    var when = document.getElementById('fieldWhen').value;
+    var body = {
+      name: file.name, size: file.size, lat: fieldDraft.lat, lon: fieldDraft.lon,
+      place: document.getElementById('fieldPlace').value.trim(),
+    };
+    if (when) body.recorded_at = when;
+    fieldBusy = true;
+    button.disabled = true;
+    status.textContent = 'starting upload...';
+    fieldPost('begin', body).then(function (begun) {
+      var offset = 0;
+      function next() {
+        if (offset >= file.size) return fieldPost('finish', { id: begun.id });
+        var size = Math.min(begun.chunk_bytes, file.size - offset);
+        return fieldReadChunk(file, offset, size).then(function (data) {
+          return fieldPost('chunk', { id: begun.id, offset: offset, data: data });
+        }).then(function (result) {
+          offset = result.received;
+          status.textContent = 'uploading ' + Math.round(offset / file.size * 100) + '%';
+          return next();
+        });
+      }
+      return next().then(function (done) {
+        status.textContent = done.warning ? done.warning : 'uploaded; analysing in the background';
+        fieldSelected = begun.id;
+        fieldDraft = null;
+        document.getElementById('fieldUpload').reset();
+        document.getElementById('fieldPos').textContent = 'click the map';
+        return fieldRefresh();
+      });
+    }).catch(function (error) {
+      if (!adminAuthCancelled(error)) status.textContent = 'upload failed: ' + error.message;
+    }).then(function () {
+      fieldBusy = false;
+      button.disabled = false;
+    });
+  }
+
+  function fieldSelect(id, pan) {
+    fieldSelected = id;
+    fieldRenderList();
+    fieldRenderDetail();
+    fieldDrawMarkers(false);
+    var rec = fieldRecordings.find(function (r) { return r.id === id; });
+    if (pan && rec && fieldMap) fieldMap.setView([rec.lat, rec.lon], Math.max(fieldMap.getZoom(), 12));
+  }
+
+  function fieldRenderDetail() {
+    var panel = document.getElementById('fieldDetail');
+    var rec = fieldRecordings.find(function (r) { return r.id === fieldSelected; });
+    if (!panel) return;
+    if (!rec) { panel.hidden = true; panel.innerHTML = ''; return; }
+    // Keep the player (and its position) when a poll refreshes the panel.
+    var player = panel.querySelector('audio');
+    if (player && panel.getAttribute('data-id') === String(rec.id) && panel.getAttribute('data-status') === rec.status) return;
+    var species = rec.species.map(function (s) {
+      return '<li class="field-species">'
+        + '<img alt="" loading="lazy" src="' + adminAttr(defaultCutoutSrc(s.sci, 1, IMG_VERSION, s.com)) + '" onerror="this.style.visibility=\'hidden\'">'
+        + '<span><b>' + adminEsc(s.com) + '</b> <i>' + adminEsc(s.sci) + '</i></span>'
+        + '<span class="field-conf">' + Math.round(s.best * 100) + '%' + (s.n > 1 ? ' · ' + s.n + 'x' : '') + '</span>'
+        + '</li>';
+    }).join('');
+    var state = rec.status === 'error' ? '<p class="field-error">' + adminEsc(rec.error || 'analysis failed') + '</p>'
+      : rec.status !== 'done' ? '<p class="field-status">' + adminEsc(FIELD_STATUS[rec.status]) + '...</p>'
+      : (species ? '<ul class="field-species-list">' + species + '</ul>' : '<p class="field-status">no bird found</p>');
+    panel.setAttribute('data-id', String(rec.id));
+    panel.setAttribute('data-status', rec.status);
+    panel.hidden = false;
+    panel.innerHTML = ''
+      + '<h3>' + adminEsc(fieldTitle(rec)) + '</h3>'
+      + '<p class="field-meta">' + adminEsc(fieldWhen(rec.recorded_at)) + ' · ' + adminEsc(fieldCoords(rec.lat, rec.lon))
+      + (rec.duration_s ? ' · ' + Math.round(rec.duration_s / 60 * 10) / 10 + ' min' : '') + '</p>'
+      + '<audio controls preload="none" src="' + adminAttr(FIELD_API + '?action=audio&id=' + rec.id) + '"></audio>'
+      + state
+      + '<details class="field-edit"><summary>correct place or date</summary>'
+      + '<label class="field-label">place<input type="text" maxlength="120" data-field-edit="place" value="' + adminAttr(rec.place) + '"></label>'
+      + '<label class="field-label">recorded<input type="datetime-local" data-field-edit="recorded_at" value="' + adminAttr((rec.recorded_at || '').slice(0, 16)) + '"></label>'
+      + '<div class="field-actions">'
+      + '<button type="button" class="field-btn" data-field-act="save">save</button>'
+      + '<button type="button" class="field-btn" data-field-act="move">move on the map</button>'
+      + '</div><p class="field-hint">changing the date or position analyses the recording again</p></details>'
+      + '<div class="field-actions">'
+      + '<button type="button" class="field-btn" data-field-act="reanalyze"' + (rec.status === 'done' || rec.status === 'error' ? '' : ' disabled') + '>analyse again</button>'
+      + '<button type="button" class="field-btn danger" data-field-act="delete"' + (rec.status === 'analyzing' ? ' disabled' : '') + '>delete</button>'
+      + '</div>'
+      + '<p class="field-status" data-field-out role="status" aria-live="polite"></p>';
+    panel.querySelectorAll('[data-field-act]').forEach(function (button) {
+      button.addEventListener('click', function () { fieldAct(rec, button.getAttribute('data-field-act'), panel); });
+    });
+  }
+
+  function fieldAct(rec, act, panel) {
+    var out = panel.querySelector('[data-field-out]');
+    var request;
+    if (act === 'move') {
+      fieldPickFor = rec.id;
+      fieldSetHint('click the map at the new position of "' + fieldTitle(rec) + '"');
+      if (fieldMap) fieldMap.getContainer().scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (act === 'save') {
+      var body = { id: rec.id, place: panel.querySelector('[data-field-edit="place"]').value.trim() };
+      var when = panel.querySelector('[data-field-edit="recorded_at"]').value;
+      if (when && when !== (rec.recorded_at || '').slice(0, 16)) body.recorded_at = when;
+      request = fieldPost('update', body);
+    } else if (act === 'reanalyze') {
+      request = fieldPost('reanalyze', { id: rec.id });
+    } else if (act === 'delete') {
+      if (!window.confirm('Delete "' + fieldTitle(rec) + '" and its audio?')) return;
+      request = fieldPost('delete', { id: rec.id }).then(function (result) { fieldSelected = null; return result; });
+    } else {
+      return;
+    }
+    if (out) out.textContent = 'working...';
+    request.then(function () {
+      panel.removeAttribute('data-status');  // force a redraw with the new state
+      return fieldRefresh();
+    }).catch(function (error) {
+      if (!adminAuthCancelled(error) && out) out.textContent = error.message;
+    });
+  }
+
   function renderAdminTools() {
     var actions = [
       ['recording', 'captures audio from the mic', 'birdnet_recording'],
