@@ -33,6 +33,10 @@ bird_names = false       # run `birdframe-names on` to show them
 # shoot_headline_px = 42
 # shoot_eyebrow_px = 18
 # shoot_lowercase = false
+# A line under the subtitle when birds in the window have no illustration yet
+# ({n} is the count; nothing shows when every bird is drawn). "" turns it off.
+# missing_label = "+ {n} oiseaux non illustrés"
+# missing_label_one = "+ {n} oiseau non illustré"
 # shoot_mat = 0.04
 # shoot_small_floor = 0.04
 # shoot_count_exp = 0.65   # tile size vs call count; higher = the loudest birds dominate more

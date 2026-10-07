@@ -18,6 +18,27 @@ All commands run on the station Pi, from `~/BirdNET-Pi`.
 
 ---
 
+## Finding birds without an illustration
+
+A species heard before it has an illustration is left out of the collage, so
+the station flags it in three places:
+
+- **Under the collage** (admin controls unlocked): a line such as
+  *2 birds without illustration: Coal Tit, Eurasian Nuthatch*, for the birds
+  of the window on screen. Clicking it opens the list below.
+- **In the Atlas** (admin controls unlocked): the pencil button in the sort
+  bar, with the number of birds still to draw, lists every species ever heard
+  without an illustration, field recordings included. Open one and use
+  *generate*; once drawn, it leaves the list.
+- **On the e-ink frame** (local capture, `shoot = true`): a small line under
+  the subtitle, *+ 2 oiseaux non illustrés*, counting the birds of the frame's
+  window. The frame refreshes when that count changes, so it clears after a
+  generate. Change the wording with `missing_label` / `missing_label_one`
+  in `~/.birdframe/config.toml`, or set `missing_label = ""` to turn it off.
+
+All three use the same rule as the collage: a species is missing when it has
+no entry in `avian/frontend/dims.json`.
+
 ## 1. Generate the illustrations
 
 Either way works; both write into `avian/assets/illustrations/`.

@@ -206,12 +206,13 @@ class FrameCaptureTests(unittest.TestCase):
         captured = [{"sci": "Turdus migratorius", "com": "Robin", "n": 2}]
         saved = []
 
-        def obtain(_cfg, _species, *, capture=None):
+        def obtain(_cfg, _species, *, capture=None, dims=None):
             if capture is not None:
                 capture["species"] = captured
             return Image.new("RGB", (20, 20))
 
         with mock.patch.object(self.display, "load_state", return_value={}), \
+                mock.patch.object(self.display, "art_index", return_value=None), \
                 mock.patch.object(self.display, "fetch_species", return_value=SPECIES), \
                 mock.patch.object(self.display, "obtain_image", side_effect=obtain), \
                 mock.patch.object(self.display, "fit_panel", side_effect=lambda image: image), \
@@ -316,8 +317,9 @@ def small_png(color=(255, 0, 0, 255)):
     return output.getvalue()
 
 
-@pytest.mark.parametrize("damage", ["iend-crc", "missing-iend", "missing-crc", "trailing",
-    "duplicate-ihdr", "oversized", "chunk-length", "idat-order", "bad-zlib", "short-zlib", "animation"])
+@pytest.mark.parametrize("damage", [
+    "iend-crc", "missing-iend", "missing-crc", "trailing", "duplicate-ihdr", "oversized",
+    "chunk-length", "idat-order", "bad-zlib", "short-zlib", "animation"])
 def test_decoder_rejects_malformed_png(damage):
     art = capture_art()
     png = small_png()

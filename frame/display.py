@@ -65,6 +65,9 @@ DEFAULTS = {
     "birdnet_conf": "/etc/birdnet/birdnet.conf",
     "day_hours": 1,
     "day_subtitle": "Dernière heure", "night_subtitle": "Aujourd'hui",
+    # A line under the subtitle when birds in the window have no illustration
+    # yet (local capture only). {n} is the count; "" turns the note off.
+    "missing_label": "+ {n} oiseaux non illustrés", "missing_label_one": "+ {n} oiseau non illustré",
     "heal_hours": 24,
     "state": "~/.birdframe/state.json",
     "cache": "~/.birdframe",
@@ -102,6 +105,46 @@ def fetch_recent(base, hours, timeout, auth=None):
     if not isinstance(data, dict) or not isinstance(data.get("species"), list):
         raise ValueError("recent API has no species list")
     return data["species"]
+
+
+def fetch_dims(base, timeout, auth=None):
+    """Slugs that have an illustration: the keys of the station's dims.json,
+    the same table the collage uses to decide which birds it can draw."""
+    url = f"{base.rstrip('/')}/dims.json"
+    req = urllib.request.Request(url, headers={"User-Agent": "AvianVisitors-frame/1.0"})
+    if auth:
+        req.add_header("Authorization", auth)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read(5_000_000))
+    if not isinstance(data, dict) or not data:
+        raise ValueError("dims.json has no illustrations")
+    return set(data)
+
+
+def missing_count(species, dims):
+    """How many species in the list the collage cannot draw (no illustration)."""
+    return len({slugify(s["sci"]) for s in species} - dims)
+
+
+def missing_note(cfg, count):
+    if not count:
+        return None
+    label = cfg["missing_label_one"] if count == 1 else cfg["missing_label"]
+    return label.format(n=count) if label else None
+
+
+def art_index(cfg):
+    """dims.json slugs when the missing-illustration note applies, else None.
+
+    Only local capture draws from this station's illustrations. A failed fetch
+    leaves the note out rather than blocking the refresh."""
+    if cfg.get("species_source") == "birdweather" or not cfg["shoot"] or not cfg["missing_label"]:
+        return None
+    try:
+        return fetch_dims(cfg["base_url"], cfg["timeout"], _auth(cfg))
+    except Exception as e:
+        print(f"illustration list fetch failed, no missing count: {e}", file=sys.stderr)
+        return None
 
 
 def signature(species, scope=""):
@@ -508,14 +551,19 @@ def skip_reason(cfg, changed, heal_due, species):
     return None
 
 
-def signature_scope(cfg):
+def signature_scope(cfg, species=None, dims=None):
     if cfg.get("species_source") == "birdweather":
         return birdweather_signature_scope(cfg)
-    return cfg.get("_schedule_scope", "")
+    scope = cfg.get("_schedule_scope", "")
+    # The missing count is printed on the panel, so generating an illustration
+    # must refresh it even when the birds in the window stay the same. A count
+    # of zero adds nothing, so existing signatures stay valid.
+    n = missing_count(species, dims) if species is not None and dims is not None else 0
+    return f"{scope}|missing:{n}" if n else scope
 
 
 # --- run --------------------------------------------------------------------
-def obtain_image(cfg, species=None, *, capture=None):
+def obtain_image(cfg, species=None, *, capture=None, dims=None):
     if cfg.get("species_source") == "birdweather":
         from shoot import shoot_birdweather
         if species is None:  # gate skipped (--no-signature): fetch the list to render
@@ -534,7 +582,8 @@ def obtain_image(cfg, species=None, *, capture=None):
               lowercase=cfg["shoot_lowercase"], mat=cfg["shoot_mat"],
               small_floor=cfg["shoot_small_floor"], count_exp=cfg["shoot_count_exp"], timeout_ms=cfg["timeout"] * 1000,
               user=cfg["basic_user"], password=cfg["basic_pass"], window_hours=cfg["hours"],
-              bird_names=cfg["bird_names"], capture=capture)
+              bird_names=cfg["bird_names"], capture=capture,
+              subtitle_note=None if dims is None else (lambda sp: missing_note(cfg, missing_count(sp, dims))))
         return Image.open(out).convert("RGB")
     src = cfg["image_url"] or cfg["image"]
     if not src:
@@ -554,10 +603,11 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     state = load_state(cfg["state"])
     sig = None
     species = None
+    dims = art_index(cfg)
     if use_signature:
         try:
             species = fetch_species(cfg, _auth(cfg))
-            sig = signature(species, signature_scope(cfg))
+            sig = signature(species, signature_scope(cfg, species, dims))
         except Exception as e:
             print(f"signature fetch failed: {e}", file=sys.stderr)  # treat as no change
     heal_due = now - state.get("last_refresh", 0) >= cfg["heal_hours"] * 3600
@@ -574,9 +624,9 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
 
     try:
         capture = {}
-        img = fit_panel(obtain_image(cfg, species, capture=capture))
+        img = fit_panel(obtain_image(cfg, species, capture=capture, dims=dims))
         if "species" in capture:
-            sig = signature(capture["species"], signature_scope(cfg))
+            sig = signature(capture["species"], signature_scope(cfg, capture["species"], dims))
     except Exception as e:
         print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
         return

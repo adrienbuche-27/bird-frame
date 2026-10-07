@@ -55,7 +55,7 @@ RAW_ILLUSTRATIONS = ("https://raw.githubusercontent.com/Twarner491/AvianVisitors
 # stay. Injected before first paint.
 HIDE_CSS = """
   .top, .slider, .return-to-atlas, .menu-shell, #menu-dd, #detail-modal, #about-modal,
-  .admin-screen, #collageTip, .modal-backdrop, #v1, #v2 { display: none !important; }
+  .admin-screen, #collageTip, .modal-backdrop, #v1, #v2, #artMissing { display: none !important; }
   .views { transform: none !important; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html, body { background: var(--paper, #efece0) !important; }
@@ -202,13 +202,15 @@ def _frame_css(headline_px, eyebrow_px, lowercase, pad_top, pad_side, pad_bottom
         f".static-head {{ padding: 0 8px 14px !important; }}"
         f".static-head .pre {{ font-size: {eyebrow_px}px !important; }}"
         f".static-head h1 {{ font-size: {headline_px}px !important; }}"
+        f".static-head .frame-note {{ margin: 8px 0 0; color: #242424; letter-spacing: 0.08em;"
+        f" font: 700 {eyebrow_px}px/1.25 ui-serif, 'Iowan Old Style', Georgia, serif; text-transform: uppercase; }}"
         ".gtile-label text { fill: #000 !important; filter: none !important;"
         " font-weight: 400 !important; }"
         ".empty-nest .empty { font-size: 18px !important; font-weight: 650 !important;"
         " letter-spacing: 0.12em !important; color: #242424 !important; }"
     )
     if lowercase:
-        css += ".static-head h1 { text-transform: none !important; }"
+        css += ".static-head h1, .static-head .frame-note { text-transform: none !important; }"
     return css
 
 
@@ -228,7 +230,7 @@ def _frame_url(url, bird_names):
     return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
 
 
-def _make_api_handler(floor_frac, window_hours, auth, species=None, capture=None):
+def _make_api_handler(floor_frac, window_hours, auth, species=None, capture=None):  # noqa: C901
     """Re-window action=recent (to preview busy days) and floor the rarest
     counts so the packer draws them a little larger. With `species` set
     (--bird-weather), serve that list for recent and an empty body for the
@@ -335,12 +337,13 @@ def _make_js_handler(xbias, ybias, count_exp, pad, label_min_px, auth, misses):
     return handler
 
 
-def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
+def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,  # noqa: C901
           headline_px=42, eyebrow_px=18, lowercase=False,
           mat=0.04, collage_vh=52, cluster_xbias=1.0, cluster_ybias=1.2,
           count_exp=0.4, cluster_pad=1, label_min_px=11, small_floor=0.04, window_hours=None,
           timeout_ms=45000, user=None, password=None, species=None, cutout_base=None,
-          cutout_local=None, empty_text="listening for birds…", bird_names=False, capture=None):
+          cutout_local=None, empty_text="listening for birds…", bird_names=False, capture=None,
+          subtitle_note=None):
     size = _output_size(vw, vh, dsf)
     pad_side, pad_top, pad_bottom = int(vw * mat), int(vh * mat * 0.92), int(vh * mat)
     auth = "Basic " + base64.b64encode(f"{user}:{password or ''}".encode()).decode() if user else None
@@ -418,6 +421,14 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
                     page.evaluate("t=>{const e=document.querySelector('.static-head .pre'); if(e)e.textContent=t;}", title)
                 if subtitle is not None:
                     page.evaluate("s=>{const e=document.querySelector('.static-head h1'); if(e)e.textContent=s;}", subtitle)
+                # subtitle_note(species) -> text or None: a small line under the
+                # subtitle, computed from the species list the collage was drawn
+                # from. Its own line, so the subtitle never wraps around it.
+                note = subtitle_note(observed.get("species") or []) if subtitle_note else None
+                if note:
+                    page.evaluate("n=>{const h=document.querySelector('.static-head h1'); if(!h)return;"
+                                  " const e=document.createElement('div'); e.className='frame-note';"
+                                  " e.textContent=n; h.after(e);}", note)
                 # Set the empty-state line for a birdless frame (the mic hasn't heard
                 # anything yet, or BirdWeather has no recent detections) and
                 # darken it so it survives the e-ink dither and the matting step's ink

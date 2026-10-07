@@ -32,12 +32,13 @@ def shooter(monkeypatch):
 
 
 @pytest.fixture
-def station():
+def station():  # noqa: C901 (one fake station with every failure mode the tests need)
     release = threading.Event()
     started = threading.Event()
     state = {"release_after": None, "malformed": False, "many": False, "requests": [],
              "auth": False, "redirect": False, "once": False, "empty": False,
-             "recent_requests": 0, "stats_delay": 0, "stats_finished": False}
+             "recent_requests": 0, "stats_delay": 0, "stats_finished": False,
+             "unillustrated": []}
     bird = ROOT / "avian/assets/illustrations/corvus-brachyrhynchos.png"
 
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -82,6 +83,7 @@ def station():
                                            for i, name in enumerate(names)]
                     if state["empty"]:
                         data["species"] = []
+                    data["species"] += [{"sci": sci, "com": sci, "n": 3} for sci in state["unillustrated"]]
                 return self.send(json.dumps(data).encode(), "application/json")
             if url.path == "/avian/api/cutout.php" and state["redirect"]:
                 self.send_response(302)
@@ -194,7 +196,7 @@ def test_slow_png_captures_full_bird_after_transfer(shooter, station, tmp_path, 
         expected_ink = sum(pixels[x, y][3] > 200 and max(pixels[x, y][:3]) < 170
                            for y in range(height // 2, height) for x in range(width))
         painted = image.convert("RGB").crop((round(box["x"]), round(box["y"]) + height // 2,
-                                              round(box["x"]) + width, round(box["y"]) + height))
+                                             round(box["x"]) + width, round(box["y"]) + height))
         pixels = painted.load()
         actual_ink = sum(max(pixels[x, y]) < 170
                          for y in range(painted.height) for x in range(painted.width))
@@ -250,7 +252,7 @@ def test_graphics_budget_keeps_all_source_art(shooter, station, tmp_path, monkey
             with Image.open(bird.parent / (name + ".png")) as original:
                 expected = original.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
             actual = captured.convert("RGB").crop((round(box["x"] * 2), round(box["y"] * 2),
-                round(box["x"] * 2) + size[0], round(box["y"] * 2) + size[1]))
+                                                   round(box["x"] * 2) + size[0], round(box["y"] * 2) + size[1]))
             ep, ap = expected.load(), actual.load()
             pairs = [(ep[x, y], ap[x, y]) for y in range(size[1]) for x in range(size[0])
                      if ep[x, y][3] > 240 and max(ep[x, y][:3]) < 180]
@@ -455,6 +457,7 @@ def test_four_mb_overlay_and_layout_match_healthy_capture(shooter, station, tmp_
             monkeypatch.setattr(pw.BrowserType, "launch", lambda self, **kw: launch(
                 self, **{**kw, "args": kw.get("args", []) + ["--force-gpu-mem-available-mb=4"]}))
         shooter.shoot(url, str(tmp_path / f"{constrained}.png"), bird_names=True, timeout_ms=15000)
+
     def rendered_layout(layout):
         # Object identities and lpN IDs are local to one page/render. Compare
         # exact source, geometry, styles, paths and text across separate pages.
@@ -613,3 +616,40 @@ def test_capture_failure_does_not_advance_real_display_state(shooter, station, t
     assert output.read_bytes() == b"last good"
     after = output.stat()
     assert (after.st_mode, after.st_uid, after.st_gid) == (before.st_mode, before.st_uid, before.st_gid)
+
+
+def test_missing_illustrations_counted_in_frame_subtitle(shooter, station, tmp_path, monkeypatch):
+    """The real display path: dims.json from the station, the count on a line
+    under the subtitle the page draws, and the count part of the saved signature."""
+    import sys
+    url, _started, state, _bird = station
+    state.update(release_after=0, unillustrated=["Nonexistus primus", "Nonexistus secundus"])
+    spec = importlib.util.spec_from_file_location("missing_display_browser", ROOT / "frame/display.py")
+    display = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(display)
+    monkeypatch.setitem(sys.modules, "shoot", shooter)
+    headings = []
+    screenshot = pw.Page.screenshot
+
+    def remember_heading(page, **kwargs):
+        headings.append(page.evaluate("() => [...document.querySelectorAll('.static-head h1, .static-head .frame-note')]"
+                                      ".map(e => e.textContent).join(' | ')"))
+        return screenshot(page, **kwargs)
+
+    monkeypatch.setattr(pw.Page, "screenshot", remember_heading)
+    monkeypatch.setattr(display, "push_panel", lambda *args: None)
+    state_file = tmp_path / "state.json"
+    cfg = dict(display.DEFAULTS, shoot=True, base_url=url, cache=str(tmp_path), state=str(state_file),
+               timeout=15, shoot_subtitle="Dernière heure")
+    display.run(cfg, force=True)
+    assert headings and headings[-1] == "Dernière heure | + 2 oiseaux non illustrés"
+    with_missing = json.loads(state_file.read_text())["signature"]
+
+    # Once the birds are illustrated (here: gone), the note and the signature change.
+    state["unillustrated"] = ["Nonexistus primus"]
+    display.run(cfg, force=True)
+    assert headings[-1] == "Dernière heure | + 1 oiseau non illustré"
+    assert json.loads(state_file.read_text())["signature"] != with_missing
+    state["unillustrated"] = []
+    display.run(cfg, force=True)
+    assert headings[-1] == "Dernière heure"
