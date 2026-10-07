@@ -101,6 +101,18 @@ class FieldAnalysisTests(unittest.TestCase):
         self.assertEqual(db.execute('SELECT COUNT(*) FROM detections').fetchone()[0], 0)
 
 
+class FieldDatabaseTests(unittest.TestCase):
+
+    def test_database_is_shared_with_the_web_server(self):
+        # SQLite creates 0644 files whatever the umask; field.php (the web
+        # server, in the owner's group) must be able to write it too.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        db_path = os.path.join(tmp, 'field.db')
+        field.connect(db_path).close()
+        self.assertEqual(os.stat(db_path).st_mode & 0o060, 0o060)
+
+
 @unittest.skipUnless(HAS_FFMPEG, 'field analysis decodes audio with ffmpeg')
 class FieldWorkerCliTests(unittest.TestCase):
     """scripts/field_analysis.py, imported the way the station runs it."""

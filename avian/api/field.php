@@ -77,6 +77,13 @@ function field_open_db(string $dir): SQLite3 {
     $db->busyTimeout(5000);
     $db->exec($schema);
     $db->exec('PRAGMA foreign_keys = ON');
+    // SQLite creates field.db as 0644 whatever the umask; the owner's shell
+    // and this web server share it. Its -wal/-shm files copy this mode.
+    $stat = @stat("$dir/field.db");
+    if (is_array($stat) && function_exists('posix_geteuid') && $stat['uid'] === posix_geteuid()
+        && ($stat['mode'] & 0060) !== 0060) {
+        @chmod("$dir/field.db", ($stat['mode'] & 0777) | 0060);
+    }
     return $db;
 }
 

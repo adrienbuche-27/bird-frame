@@ -32,6 +32,8 @@ $dir = sys_get_temp_dir() . '/field-api-' . bin2hex(random_bytes(4));
 mkdir($dir);
 $db = field_open_db($dir);
 check_field(is_dir("$dir/audio"), 'audio folder is created');
+clearstatcache();
+check_field((fileperms("$dir/field.db") & 0060) === 0060, 'field.db is group-writable for the shell and the web server');
 
 // --- validation --------------------------------------------------------
 check_field(field_time('2026-10-06T07:30') === '2026-10-06T07:30:00', 'minutes-only time gets seconds');

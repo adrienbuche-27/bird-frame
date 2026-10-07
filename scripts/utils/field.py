@@ -41,12 +41,28 @@ def field_dir(conf):
     return os.path.join(recs.replace('${HOME}', home).replace('$HOME', home), 'Field')
 
 
+def share_with_group(path):
+    """Give the group write access to a file this user owns.
+
+    SQLite creates databases as 0644 whatever the umask, but the owner's
+    shell and the web server (field.php, in the owner's group) both write
+    field.db. Its -wal and -shm files copy the database's mode.
+    """
+    try:
+        st = os.stat(path)
+        if st.st_uid == os.getuid() and st.st_mode & 0o060 != 0o060:
+            os.chmod(path, st.st_mode | 0o060)
+    except OSError:
+        pass
+
+
 def connect(db_path):
     db = sqlite3.connect(db_path, timeout=10)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys = ON')
     with open(SCHEMA_PATH) as f:
         db.executescript(f.read())
+    share_with_group(db_path)
     return db
 
 
