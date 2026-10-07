@@ -88,6 +88,10 @@ $rec = field_list($db)['recordings'][0];
 check_field(array_column($rec['species'], 'sci') === ['Pica pica', 'Erithacus rubecula'], 'species sorted by best confidence');
 check_field($rec['species'][0]['n'] === 2 && $rec['species'][0]['best'] === 0.93, 'species summary counts and best');
 check_field(count($rec['detections']) === 3, 'every detection listed');
+putenv("AV_FIELD_DIR=$dir");
+check_field(field_species_common_name('Erithacus rubecula') === 'European Robin', 'generate.php can name a field-only species');
+check_field(field_species_common_name('Calypte anna') === null, 'species never heard in the field is unknown');
+putenv('AV_FIELD_DIR');
 
 $u = field_update($db, ['id' => $id, 'place' => 'Bois de Boulogne']);
 check_field($u['status'] === 'done', 'renaming the place does not re-analyse');

@@ -207,6 +207,13 @@ const renderContext = {
   stopAtlasCardAudio() { stopCalls += 1; },
   clearAtlasPackedState() {},
   atlasWindowHours() { return effectiveHours; },
+  // Field recordings ("elsewhere" sort) are admin-only and absent here:
+  // the Atlas falls back to the station's own sort.
+  effectiveAtlasSort() { return renderContext.window.__atlasSort || 'life'; },
+  syncAtlasSortButtons() {},
+  loadFieldAtlas() {},
+  fieldAtlasSpecies: null,
+  fieldAtlasError: '',
   educatorScopeId() { return ''; },
   educatorScopeGeneration: 0,
   educatorScopeLabel() { return 'Listening period'; },
@@ -610,7 +617,7 @@ assert.match(css, /#atlasGrid\[data-layout="classic"\][\s\S]*?repeat\(auto-fill,
   'Classic mode restores the historical responsive desktop grid');
 assert.match(css, /#atlasGrid\[data-layout="classic"\][\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/,
   'Classic mode restores the historical two-up mobile grid');
-assert.match(html, /styles\.css\?v=r197/, 'Classic Atlas styles have a fresh cache key');
-assert.match(html, /apt\.js\?v=r237/, 'Classic Atlas and admin recovery behavior have a fresh cache key');
+assert.match(html, /styles\.css\?v=r198/, 'Classic Atlas styles have a fresh cache key');
+assert.match(html, /apt\.js\?v=r238/, 'Classic Atlas and admin recovery behavior have a fresh cache key');
 
 console.log('classic Atlas smoke: ok');

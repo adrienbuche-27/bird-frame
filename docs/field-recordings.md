@@ -15,8 +15,8 @@ Field recordings are kept apart from the station:
 - they never enter `birds.db`, so the collage, the statistics and the e-ink
   frame only ever show what the station's own microphone heard.
 
-> **Status.** Parts A (storage, upload API, analysis) and B (the map page)
-> are done. Field-recording stamps in the Atlas (part C) come next.
+Three parts: storage and analysis, the **map** page, and the
+**elsewhere** stamps in the Atlas.
 
 ---
 
@@ -72,6 +72,27 @@ click the map instead. Behind an HTTPS setup (see
 The map library (Leaflet, pinned and checked with a hash) and the map tiles
 come from the internet (unpkg.com and openstreetmap.org), and only when this
 page is open. Without internet the page says so; uploads still work.
+
+---
+
+## In the Atlas: "elsewhere" stamps
+
+While admin controls are unlocked, the Atlas sort bar has a fifth button, a
+map pin (**elsewhere**). It shows one stamp per species found in your field
+recordings, newest first, including species the station also hears (those
+then have a stamp in both views, each counting its own detections). The time
+window buttons do not apply to it: it always shows every field recording.
+
+Opening an elsewhere stamp shows the same postcard as the station's stamps,
+computed from the field detections: number of detections, first heard,
+rarity, the description, and under **Recordings** one row per detection with
+its date, confidence, place and a player for that moment of the recording.
+
+A species with no illustration shows the nest and the **generate** button, as
+for the station: generation accepts species heard only in field recordings.
+
+When admin controls lock, the button disappears, the field data is dropped
+from the page and an open elsewhere postcard closes.
 
 ---
 

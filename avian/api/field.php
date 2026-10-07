@@ -433,6 +433,23 @@ function field_serve_audio(string $dir, array $row): void {
     exit;
 }
 
+/** Common name of a species found in a field recording, or null. Read-only. */
+function field_species_common_name(string $sci): ?string {
+    $path = field_dir() . '/field.db';
+    if (!is_file($path)) return null;
+    try {
+        $db = new SQLite3($path, SQLITE3_OPEN_READONLY);
+        $db->busyTimeout(2000);
+        $st = $db->prepare('SELECT com_name FROM detections WHERE sci_name = :s ORDER BY id DESC LIMIT 1');
+        $st->bindValue(':s', $sci, SQLITE3_TEXT);
+        $row = $st->execute()->fetchArray(SQLITE3_ASSOC);
+        $db->close();
+    } catch (Throwable $e) {
+        return null;
+    }
+    return $row ? (string)$row['com_name'] : null;
+}
+
 if (defined('AVIAN_FIELD_LIBRARY_ONLY')) return;
 
 // --- dispatch -----------------------------------------------------------

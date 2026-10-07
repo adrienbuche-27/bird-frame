@@ -26,7 +26,11 @@ RECORDINGS = [
      "created_at": "2026-05-01T09:00:00", "analyzed_at": "2026-05-01T09:01:00",
      "species": [{"sci": "Pica pica", "com": "Eurasian Magpie", "n": 3, "best": 0.93},
                  {"sci": "Erithacus rubecula", "com": "European Robin", "n": 1, "best": 0.78}],
-     "detections": []},
+     "detections": [{"sci": "Pica pica", "com": "Eurasian Magpie", "confidence": 0.81, "start": 3.0, "end": 6.0},
+                    {"sci": "Pica pica", "com": "Eurasian Magpie", "confidence": 0.93, "start": 120.0, "end": 123.0},
+                    {"sci": "Pica pica", "com": "Eurasian Magpie", "confidence": 0.85, "start": 200.0, "end": 203.0},
+                    {"sci": "Erithacus rubecula", "com": "European Robin", "confidence": 0.78, "start": 9.0,
+                     "end": 12.0}]},
     {"id": 1, "name": "coast.wav", "recorded_at": "2026-04-20T18:40:00", "lat": 47.2, "lon": -2.5,
      "place": "", "status": "error", "error": "could not decode audio: invalid data", "duration_s": None,
      "size_bytes": 10, "created_at": "2026-04-20T20:00:00", "analyzed_at": None,
@@ -61,8 +65,10 @@ def browser():
         b.close()
 
 
-def open_field_page(browser, site, calls):
+def open_field_page(browser, site, calls, path="#admin=field", unlocked=True, stored_sort=None):
     page = browser.new_page(viewport={"width": 1200, "height": 900})
+    if stored_sort:
+        page.add_init_script("localStorage.setItem('bird:atlasSort', %s)" % json.dumps(stored_sort))
     state = {"recordings": [dict(r) for r in RECORDINGS], "upload": bytearray()}
     tile = blank_png()
 
@@ -70,6 +76,8 @@ def open_field_page(browser, site, calls):
         request = route.request
         url = request.url
         if "/avian/api/menu.php" in url:
+            if not unlocked:
+                return route.fulfill(status=401, json={"ok": False, "error": "unauthorized"})
             return route.fulfill(json={"items": [
                 {"label": "settings", "href": "/#admin=settings", "native": True},
                 {"label": "map", "href": "/#admin=field", "native": True, "full": True}],
@@ -113,8 +121,9 @@ def open_field_page(browser, site, calls):
         route.fulfill(body=tile, content_type="image/png")
 
     page.route("https://tile.openstreetmap.org/**", tile_route)
-    page.goto(site + "#admin=field")
-    page.wait_for_selector(".field-map.leaflet-container", timeout=15000)
+    page.goto(site + path)
+    if path == "#admin=field":
+        page.wait_for_selector(".field-map.leaflet-container", timeout=15000)
     return page, state
 
 
@@ -206,3 +215,51 @@ def test_edit_reanalyse_and_delete(browser, site):
     page.click("[data-field-act=delete]")
     page.wait_for_function("document.querySelectorAll('.field-item').length === 1")
     assert page.locator("#fieldDetail").is_hidden()
+
+
+def open_atlas(browser, site, calls, **options):
+    page, state = open_field_page(browser, site, calls, path="", **options)
+    page.click("#slider button[data-i='2']")
+    return page, state
+
+
+def test_elsewhere_stamps_and_postcard(browser, site):
+    calls = []
+    page, _ = open_atlas(browser, site, calls)
+    elsewhere = page.locator("#atlasSort button[data-sort='elsewhere']")
+    elsewhere.wait_for(state="visible")
+    elsewhere.click()
+    page.wait_for_selector("#atlasGrid .bird-card[data-field='1']")
+    cards = page.locator("#atlasGrid .bird-card")
+    assert sorted(cards.evaluate_all("cs => cs.map(c => c.dataset.sci)")) == ["Erithacus rubecula", "Pica pica"]
+    assert cards.evaluate_all("cs => cs.every(c => c.dataset.field === '1')")
+    # The card plays its best detection: 0.93 at 120-123 s of recording 2.
+    magpie = page.locator("#atlasGrid .bird-card[data-sci='Pica pica']")
+    assert magpie.get_attribute("data-audio") == "./avian/api/field.php?action=audio&id=2#t=120,123"
+    assert page.evaluate("localStorage.getItem('bird:atlasSort')") == "elsewhere"
+
+    magpie.click()
+    page.wait_for_selector("#modalRecordings .field-rec-row", state="attached")  # Recordings starts folded
+    assert page.inner_text("#modalCommon") == "Eurasian Magpie"
+    assert page.inner_text("#modalAllTime") == "3"
+    page.click("#postcard-modal .postcard-recordings summary")
+    rows = page.locator("#modalRecordings .field-rec-row")
+    rows.first.wait_for(state="visible")
+    assert rows.count() == 3
+    assert "Bois de Vincennes" in rows.first.inner_text()
+    assert "elsewhere" in page.inner_text("#modalRecCount").lower()
+    srcs = rows.evaluate_all("rs => rs.map(r => r.querySelector('audio').getAttribute('src'))")
+    assert srcs[0].endswith("id=2#t=200,203")  # newest detection first
+    # The station's species API is never asked about a field postcard.
+    assert not any("action=species" in c for c in page.evaluate("performance.getEntries().map(e => e.name)"))
+
+
+def test_elsewhere_is_hidden_without_admin(browser, site):
+    calls = []
+    page, _ = open_atlas(browser, site, calls, unlocked=False, stored_sort="elsewhere")
+    page.wait_for_timeout(800)
+    assert page.locator("#atlasSort button[data-sort='elsewhere']").is_hidden()
+    # A remembered "elsewhere" sort falls back to the station's life list.
+    assert page.locator("#atlasSort button[aria-current='true']").get_attribute("data-sort") == "life"
+    assert not any(action == "list" for action, _, _ in calls)
+    assert page.locator("#atlasGrid .bird-card[data-field='1']").count() == 0

@@ -4588,3 +4588,11 @@ body.av-local #dd-items  { display: block; }
   .field-columns { grid-template-columns: minmax(0, 1fr); }
   .field-map { height: 46vh; }
 }
+
+/* Postcard rows for an "elsewhere" stamp: one per field detection, with
+   the place and a player for that moment of the uploaded recording. */
+.field-rec-row { list-style: none; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.field-rec-row .field-rec-head { cursor: default; }
+.field-rec-place { margin: 4px 0 6px; font-size: 12px; color: var(--ink-soft); }
+.field-rec-row audio { width: 100%; height: 34px; }
+.atlas-sort button[hidden] { display: none; }
