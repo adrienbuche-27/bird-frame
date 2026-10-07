@@ -1,6 +1,6 @@
 # AvianVisitors e-ink frame: handoff notes
 
-Context for continuing work on this repo: what the project is, how the owner's station and frame are set up, what this fork changes compared with upstream, and what is still rough. Last updated 2026-10-06, after PR #8.
+Context for continuing work on this repo: what the project is, how the owner's station and frame are set up, what this fork changes compared with upstream, and what is still rough. Last updated 2026-10-07, after PR #10.
 
 ## Project
 
@@ -16,6 +16,7 @@ Context for continuing work on this repo: what the project is, how the owner's s
 - **Panel:** Waveshare 7.3" e-Paper HAT (800x480), not upstream's Pimoroni Inky Impression 13.3" (1600x1200). The variant is **(E)**, the 6-colour Spectra 6 panel, so the live config has `panel = "waveshare_7in3e"` and the driver module is `waveshare_epd/epd7in3e.py`. Only (E) has been tested on hardware; the (F) and (G) paths are untested.
 - **Boot config:** `dtoverlay=spi0-0cs` is commented out in `/boot/firmware/config.txt`. That overlay is for the Inky, which has no chip-select line; the Waveshare driver needs the hardware chip-select (CE0, GPIO 8).
 - **Illustrations:** the owner is in Europe. About 80 European species (perched and flight poses, about 160 images) were added on top of the bundled North American set. New species are generated one at a time with the Atlas **generate** button, by choice: bulk generation through `pregen.py` cost too much on Gemini. Do not propose automatic generation without asking.
+- **Working style:** the owner writes in French and wants a design agreed before any code. Larger features are split into parts (A, B, C…), each validated, then tested on a branch on the Pi before merging to `main`.
 
 ## How the frame works
 
@@ -60,6 +61,20 @@ The config lives outside the repo at `~/.birdframe/config.toml`. Keys that matte
 | #6 | This file rewritten for the state after #1–#5. |
 | #7 | `avian/scripts/upgrade_cutouts.py` progress output: timestamped steps, a per-bird `[i/N]` counter with time left, a final summary, and `-v`/`--verbose` for sizes, timings and the remote command. The per-bird loop is `cut_all()`. Tests in `tests/test_upgrade_cutouts.py`. |
 | #8 | 138 bulk European images (69 species from `pregen.py`) had never been cut out: opaque RGB with the cream ground, drawn as rectangles. All were cut with `cutout.py`; `anser-rossii` (perched) was redone with `upgrade_cutouts.birefnet_cut` because the matte erased its white body. Masks rebuilt; `TABLE_VERSION` r14, `SKETCH_VERSION`/`IMG_VERSION` r13 in `apt.js`. CI: `python-lint` now lints only the `.py` files a PR changes, and `frame/waveshare_epd/` is excluded in `.flake8`. |
+| #9 | This file updated for #6–#8 and the panel variant (E). |
+| #10 | Field recordings (see below): `scripts/utils/field.py`, `scripts/field_analysis.py`, `scripts/field_schema.sql`, `avian/api/field.php` (added to the Caddy list in `scripts/update_caddyfile.sh`), the **map** admin page and the Atlas **elsewhere** stamps in `apt.js`/`styles.css`/`index.html`, `generate.php` accepting field-only species, `docs/field-recordings.md`. Tests: `test_field_analysis.py`, `test_field_api.php`/`.py`, `test_field_map_browser.py`. The merge also brought 8 new species (corvus-monedula, parus-major, periparus-ater, picus-viridis from `main`; delichon-urbicum, dendrocopos-major, falco-tinnunculus, garrulus-glandarius from the branch), masks rebuilt, `TABLE_VERSION` r15, cache keys `styles.css?v=r198`, `apt.js?v=r239`. |
+
+## Field recordings (PR #10)
+
+Full guide: [`docs/field-recordings.md`](docs/field-recordings.md). Tested on `traffic-pi`: command line, API, map and Atlas stamps all work.
+
+- **What:** audio recorded elsewhere (a phone on a walk) is uploaded, analysed with the station's BirdNET model using **the recording's place and week** for the range filter, shown on a map, and shown in the Atlas as "elsewhere" stamps. Admin-only everywhere, because recordings reveal where the owner has been.
+- **Storage:** `~/BirdSongs/Field/` (`<RECS_DIR>/Field`): `field.db` (SQLite WAL, tables `recordings` and `detections`) and `audio/`. Never `birds.db`, so the collage, statistics and e-ink frame only show the station's own microphone. The folder is `2775` and `field.db` is chmodded group-writable (SQLite creates files 0644 whatever the umask), so both `abuche` and `caddy` can write.
+- **Analysis:** `scripts/utils/field.py` decodes with ffmpeg and runs the model. `CONFIDENCE`, the privacy filter and the exclude list apply; the include list does not. Date: request, else file metadata (ffprobe `creation_time`), else upload time. Always run it with `birdnet/bin/python3` (the station venv); the system Python lacks the model packages, and installing tensorflow/tzlocal there is not needed.
+- **Worker:** `field.php` spawns `field_analysis.py run` in the background (one at a time, `flock` on `.worker.lock`, log in `worker.log`). Over SSH: `birdnet/bin/python3 scripts/field_analysis.py add FILE --lat .. --lon .. [--date ..] [--place ..]` and `... list`.
+- **API** (`avian/api/field.php`): `list`, `audio` (Range), `begin`/`chunk`/`finish` (base64 chunks of 2 MB inside JSON, to stay under PHP's 8 MB post limit and keep the JSON action guard), `update`, `reanalyze`, `delete`. Max 200 MB per file. `generate.php` loads it with `AVIAN_FIELD_LIBRARY_ONLY` to name species heard only in the field.
+- **Map page** (menu → **map**, `/#admin=field`): Leaflet 1.9.4 from unpkg with SRI hashes, OpenStreetMap tiles. The site is `no-referrer`, but OSM blocks tiles without a Referer, so only the tile layer uses `referrerPolicy: 'strict-origin-when-cross-origin'`. "Use my position" is greyed out over plain `http://` (browsers only geolocate on secure pages).
+- **Atlas:** a fifth sort button (map pin, `data-sort="elsewhere"`), visible only while admin is unlocked; no time window applies. The postcard lists each detection with place, date, confidence and an `<audio>` clip (`field.php?action=audio&id=N#t=start,end`). Locking admin hides the button, drops the data and closes an open elsewhere postcard.
 
 ## Illustrations workflow
 
@@ -67,6 +82,8 @@ Full guide: [`docs/custom-illustrations.md`](docs/custom-illustrations.md).
 
 - The collage only draws a species listed in `avian/frontend/masks.json` and `dims.json`. A PNG without a mask entry is skipped silently. This is how the European birds once disappeared: a Git operation reset `masks.json` while the PNGs were still untracked.
 - Commit the PNGs, `cuts.json`, `masks.json` and `dims.json` together. Never commit `.generate.*` or `raw/` (both ignored).
+- Push new illustrations to one branch only. Pushing the same species with different images to `main` and to a feature branch blocks the merge (add/add conflicts on the PNGs, conflicts in `masks.json`/`dims.json`); this happened during #10. To resolve, pick one image per file, align `cuts.json` with it, regenerate the tables with `build_masks.py` (never hand-merge them) and bump `TABLE_VERSION`.
+- After rebuilding the tables, bump `TABLE_VERSION` in `apt.js`; after editing `apt.js` or `styles.css`, bump their `?v=` keys in `index.html`. The `apt.js` key is pinned in `tests/smoke_admin_ui_polish.mjs`, `smoke_atlas_classic.mjs` and `smoke_educators_ui.mjs`; update all three with it.
 - Every illustration must be an RGBA cutout. Art made in bulk with `pregen.py` must go through `cutout.py` before it is committed, otherwise it shows as an opaque rectangle (the #8 bug). Quick check: `python3 -c "from PIL import Image; print(Image.open('avian/assets/illustrations/<slug>.png').mode)"` must print `RGBA`. `cutout.py` loads BiRefNet (~9–14 GB of RAM per process), so run it one slug at a time; give it the `-2` slug first, because a perched slug also processes its flight pose. Check white or pale birds afterwards: the matte can erase a pale body.
 - Birds made with the website button get a quick chroma cutout and are listed as `"chroma"` in `cuts.json`. `avian/scripts/upgrade_cutouts.py --pi abuche@<address>`, run from a computer, re-cuts them with BiRefNet using `raw/` on the Pi (add `-v` for per-step detail). `raw/` exists only on the Pi; do not delete it while `cuts.json` lists birds.
 
@@ -75,7 +92,8 @@ Full guide: [`docs/custom-illustrations.md`](docs/custom-illustrations.md).
 - **Re-running `install.sh` without `--panel`** adds `dtoverlay=spi0-0cs` back and breaks the Waveshare panel. Always run `./install.sh --panel waveshare_7in3e` on this frame.
 - **`install.sh --panel` has not run on a Pi yet**, in particular installing `lgpio` from pip on Raspberry Pi OS.
 - **Tools → Pull latest** (`scripts/update_birdnet.sh`) refuses to run, because it only accepts upstream as `origin`. Update with `git pull`. Merging upstream changes is manual (`git fetch upstream && git merge upstream/avian-visitors`), and changes to `frame/display.py` or `frame/install.sh` may conflict.
-- **CI:** green on `main` since #8. `python-lint` lints only the Python files a PR changes, so editing an old file can still surface its inherited findings (about 425 across the codebase, e.g. C901 in `frame/shoot.py`). To run the browser capture tests locally, Playwright needs a matching Chromium; in a Claude cloud session use `FRAME_TEST_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. Without it the tests fail before running, which once looked like an upstream failure but was not.
+- **Field recordings:** a new API file is only served once it is listed in `scripts/update_caddyfile.sh` and the helper is reinstalled and run (`sudo install -o root -g root -m 0755 scripts/update_caddyfile.sh /usr/local/sbin/avian-caddy-refresh && sudo /usr/local/sbin/avian-caddy-refresh`); otherwise Caddy answers 404. The map needs internet (unpkg, OSM). Test recordings must not be committed: the repo is public and audio reveals places (two `.m4a` files were committed by mistake and removed in #10; they remain in history).
+- **CI:** green on `main` since #8. `python-lint` lints only the Python files a PR changes, so editing an old file can still surface its inherited findings (about 425 across the codebase, e.g. C901 in `frame/shoot.py`). To run the browser capture tests locally, Playwright needs a matching Chromium; in a Claude cloud session use `FRAME_TEST_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. `test_generation_install_fixes.py` needs `USER` set in the environment. Without it the tests fail before running, which once looked like an upstream failure but was not.
 - **Layout** still happens on the hard-coded 1200x1600 canvas (`PANEL_W`, `PANEL_H`) and is adapted to 800x480 only at push time. Laying out at the panel's resolution would be sharper and make `opening` more predictable.
 - **`--preview`** still simulates the Inky's Spectra 6 palette, not the Waveshare pipeline (white-point lift, colour boost, pure-ink dithering).
 - **`saturation`** as a colour boost on Waveshare is a first guess and has not been tuned.
@@ -98,6 +116,11 @@ sudo systemctl daemon-reload && sudo systemctl restart birdframe.timer
 
 # Rebuild the collage masks after adding illustrations
 python3 avian/scripts/build_masks.py
+
+# Field recordings: analyse a file, list everything, see the worker log
+birdnet/bin/python3 scripts/field_analysis.py add ~/walk.m4a --lat 48.84 --lon 2.44 --place "Bois"
+birdnet/bin/python3 scripts/field_analysis.py list
+tail -n 30 ~/BirdSongs/Field/worker.log
 ```
 
 Messages printed by `display.py`:
