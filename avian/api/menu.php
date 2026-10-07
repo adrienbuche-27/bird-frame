@@ -160,6 +160,8 @@ $items = [
         ['label' => 'system',   'href' => '/#admin=system',   'native' => true],
         ['label' => 'logs',     'href' => '/#admin=logs',     'native' => true],
         ['label' => 'tools',    'href' => '/#admin=tools',    'native' => true],
+        // Field recordings: audio recorded elsewhere, on a map (field.php).
+        ['label' => 'map',      'href' => '/#admin=field',    'native' => true, 'full' => true],
 ];
 if (!empty($educatorProfile['valid']) && !empty($educatorProfile['enabled'])) {
     $items[] = [

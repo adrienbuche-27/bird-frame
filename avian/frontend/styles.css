@@ -4529,3 +4529,70 @@ body.av-local #dd-items  { display: block; }
     box-shadow: var(--edge-lg);
   }
 }
+
+/* ---- Field recordings (#admin=field) ---------------------------------
+   A map of audio recorded away from the station, an upload form, and the
+   birds found in each recording. Leaflet supplies its own map styles. */
+.field-map {
+  height: 52vh; min-height: 300px; border-radius: 12px; overflow: hidden;
+  box-shadow: var(--edge-lg); background: var(--control-track);
+  display: flex; align-items: center; justify-content: center;
+}
+.field-map.leaflet-container { display: block; }
+.field-map-note { margin: 0; padding: 20px; max-width: 46ch; text-align: center; color: var(--ink-soft); font-size: 13px; }
+.field-map-hint { margin: 8px 0 22px; text-align: center; color: var(--ink-soft); font-size: 12px; }
+.field-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 28px; align-items: start; }
+.field-upload, .field-detail {
+  background: var(--paper); border-radius: 12px; box-shadow: var(--edge); padding: 18px;
+}
+.field-detail { margin-bottom: 22px; }
+.field-detail h3 { margin: 0 0 4px; font-size: 18px; }
+.field-label { display: block; margin: 0 0 14px; font-size: 12px; color: var(--ink); }
+.field-label input[type="text"], .field-label input[type="datetime-local"], .field-label input[type="file"] {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px 10px;
+  font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--control-track); border: 0; border-radius: 8px; box-shadow: var(--recess);
+}
+.field-opt { color: var(--ink-soft); font-weight: 400; }
+.field-pos { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.field-btn {
+  font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 8px; border: 0; cursor: pointer;
+  color: var(--ink); background: var(--paper); box-shadow: var(--raised);
+}
+.field-btn.primary { width: 100%; padding: 10px; background: var(--control-on); color: var(--control-on-thumb); }
+.field-btn.danger { color: var(--danger); }
+.field-btn:disabled { opacity: 0.45; cursor: default; }
+.field-status, .field-hint, .field-meta { margin: 8px 0 0; font-size: 12px; color: var(--ink-soft); min-height: 1em; }
+.field-error { margin: 10px 0; font-size: 12px; color: var(--danger); }
+.field-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.field-empty { color: var(--ink-soft); font-size: 13px; }
+.field-item {
+  display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+  padding: 10px 12px; border: 0; border-radius: 10px; background: var(--paper); box-shadow: var(--edge);
+}
+.field-item.on { box-shadow: inset 0 0 0 2px var(--accent); }
+.field-item-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.field-item-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-soft); }
+.field-chip { font-style: normal; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+.field-chip.error { color: var(--danger); }
+.field-detail audio { width: 100%; margin: 12px 0 6px; }
+.field-species-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
+.field-species { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.field-species img { width: 44px; height: 44px; object-fit: contain; }
+.field-species i { color: var(--ink-soft); }
+.field-conf { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.field-edit { margin: 12px 0 4px; font-size: 12px; }
+.field-edit summary { cursor: pointer; color: var(--ink-soft); margin-bottom: 10px; }
+.field-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+@media (max-width: 760px) {
+  .field-columns { grid-template-columns: minmax(0, 1fr); }
+  .field-map { height: 46vh; }
+}
+
+/* Postcard rows for an "elsewhere" stamp: one per field detection, with
+   the place and a player for that moment of the uploaded recording. */
+.field-rec-row { list-style: none; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.field-rec-row .field-rec-head { cursor: default; }
+.field-rec-place { margin: 4px 0 6px; font-size: 12px; color: var(--ink-soft); }
+.field-rec-row audio { width: 100%; height: 34px; }
+.atlas-sort button[hidden] { display: none; }

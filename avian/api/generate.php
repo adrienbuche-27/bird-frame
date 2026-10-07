@@ -205,12 +205,19 @@ if ($action === 'start') {
     $st->bindValue(':s', $sci, SQLITE3_TEXT);
     $row = $st->execute()->fetchArray(SQLITE3_ASSOC);
     $db->close();
-    if (!$row) {
+    $com = $row ? (string)$row['Com_Name'] : null;
+    if ($com === null) {
+        // Also accept a species found in the owner's field recordings
+        // (field.php): the "elsewhere" Atlas stamps offer generation too.
+        if (!defined('AVIAN_FIELD_LIBRARY_ONLY')) define('AVIAN_FIELD_LIBRARY_ONLY', true);
+        require_once __DIR__ . '/field.php';
+        $com = field_species_common_name($sci);
+    }
+    if ($com === null) {
         http_response_code(404);
         echo json_encode(['error' => 'species not in your detections']);
         exit;
     }
-    $com = (string)$row['Com_Name'];
 
     $key = conf_value($CONF, 'GEMINI_API_KEY');
     if ($key === '') {

@@ -20,6 +20,7 @@ class LanAdminAuthStaticTests(unittest.TestCase):
             "birdnet-status.php",
             "config.php",
             "export.php",
+            "field.php",
             "generate.php",
             "maintenance.php",
             "menu.php",
@@ -80,7 +81,7 @@ class LanAdminAuthStaticTests(unittest.TestCase):
         init = install.index("auth-state-init")
         caddy = install.index("install_Caddyfile")
         self.assertLess(init, caddy)
-        flow = install[install.index("install_services() {") :]
+        flow = install[install.index("install_services() {"):]
         self.assertLess(
             flow.index("prepare_caddy_webroot"),
             flow.index("install_Caddyfile"),
@@ -112,7 +113,7 @@ class LanAdminAuthStaticTests(unittest.TestCase):
         self.assertIn("restoring:yes", caddy)
         self.assertNotIn("AVIAN_CAPTURE_ICECAST_STATE", caddy)
         self.assertIn("stop_icecast_backend", caddy)
-        closure = caddy[caddy.index("icecast_backend_closed()") : caddy.index("stop_icecast_backend()")]
+        closure = caddy[caddy.index("icecast_backend_closed()"):caddy.index("stop_icecast_backend()")]
         self.assertIn("ControlGroup", closure)
         self.assertIn("icecast_processes_closed", closure)
         self.assertIn("/proc/[0-9]*/comm", caddy)
@@ -414,11 +415,14 @@ class LanAdminAuthStaticTests(unittest.TestCase):
         items = payload["items"]
         self.assertEqual(
             [item["label"] for item in items],
-            ["settings", "system", "logs", "tools"],
+            ["settings", "system", "logs", "tools", "map"],
         )
         self.assertTrue(all(item["native"] is True for item in items))
-        self.assertTrue(all("full" not in item for item in items))
-        self.assertEqual(items[-1]["href"], "/#admin=tools")
+        self.assertTrue(all("full" not in item for item in items[:4]))
+        self.assertEqual(items[3]["href"], "/#admin=tools")
+        # Field recordings: one full-width entry after the four base items.
+        self.assertEqual(items[-1]["href"], "/#admin=field")
+        self.assertIs(items[-1]["full"], True)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_auth_runtime_suite(self):
