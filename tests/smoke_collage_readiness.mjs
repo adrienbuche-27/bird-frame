@@ -9,9 +9,11 @@ function between(start, end) {
   return apt.slice(offset, apt.indexOf(end, offset));
 }
 const draws = [];
+let missingUpdates = 0;
 const context = {
   DATA: { recent: null },
   renderCollage(items) { draws.push(items); },
+  updateMissingArtUI() { missingUpdates += 1; },
 };
 vm.createContext(context);
 vm.runInContext(between('  function renderCollageFromData(', '  var rTimer;'), context);
@@ -24,6 +26,7 @@ context.DATA.recent = { species: [] };
 context.renderCollageFromData();
 assert.equal(draws.length, 1, 'a successful zero-detection result clears old birds');
 assert.deepEqual(draws[0], []);
+assert.equal(missingUpdates, 1, 'the missing-illustration line follows each drawn window');
 
 let finishStats;
 let earlyDraws = 0;

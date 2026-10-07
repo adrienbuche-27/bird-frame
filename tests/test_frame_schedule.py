@@ -113,6 +113,7 @@ class SunScheduleTests(unittest.TestCase):
                 self.display.save_state(str(state_path), *state)
             cfg = self.cfg(state=str(state_path), cache=tmp)
             with mock.patch.object(self.display, "fetch_species", return_value=species), \
+                    mock.patch.object(self.display, "art_index", return_value=None), \
                     mock.patch.object(self.display, "obtain_image") as obtain, \
                     mock.patch.object(self.display, "mat_and_center"), \
                     mock.patch.object(self.display, "fit_panel"), \

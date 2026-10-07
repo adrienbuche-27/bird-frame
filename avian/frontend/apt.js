@@ -1045,27 +1045,104 @@
   var fieldAtlasBySci = {};
   var fieldAtlasLoading = false;
   var fieldAtlasError = '';
+  // Birds heard but not illustrated yet: the "to illustrate" sort lists every
+  // one (station life list and field recordings), and a line under the
+  // collage counts those in the current window. Admin-only, like generate.
+  var missingAtlasBtn = atlasSortEl ? atlasSortEl.querySelector('[data-sort="missing"]') : null;
+  var artMissingEl = document.getElementById('artMissing');
   function effectiveAtlasSort() {
     var sort = window.__atlasSort || 'life';
-    return sort === 'elsewhere' && (!fieldAtlasBtn || fieldAtlasBtn.hidden) ? 'life' : sort;
+    if (sort === 'elsewhere' && (!fieldAtlasBtn || fieldAtlasBtn.hidden)) return 'life';
+    if (sort === 'missing' && (!missingAtlasBtn || missingAtlasBtn.hidden)) return 'life';
+    return sort;
   }
   function syncAtlasSortButtons() {
     var sort = effectiveAtlasSort();
     atlasSortBtns.forEach(function (b) { b.setAttribute('aria-current', b.dataset.sort === sort ? 'true' : 'false'); });
     if (atlasSortEl) syncPill(atlasSortEl);
   }
+  function setAdminAtlasButton(btn, on) {
+    if (!btn) return false;
+    var was = !btn.hidden;
+    btn.hidden = !on;
+    btn.disabled = !on;
+    if (on) btn.removeAttribute('data-unavailable');
+    else btn.setAttribute('data-unavailable', 'true');
+    return was !== on && window.__atlasSort === btn.dataset.sort;
+  }
   function setFieldAtlasAvailable(on) {
-    if (!fieldAtlasBtn) return;
-    var was = !fieldAtlasBtn.hidden;
-    fieldAtlasBtn.hidden = !on;
-    fieldAtlasBtn.disabled = !on;
-    if (on) fieldAtlasBtn.removeAttribute('data-unavailable');
-    else fieldAtlasBtn.setAttribute('data-unavailable', 'true');
+    var fieldChanged = setAdminAtlasButton(fieldAtlasBtn, on);
+    var missingChanged = setAdminAtlasButton(missingAtlasBtn, on);
     if (!on) { fieldAtlasSpecies = null; fieldAtlasBySci = {}; fieldAtlasError = ''; }
-    if (was !== on && window.__atlasSort === 'elsewhere') {
+    // The missing count includes field-only species, so fetch them up front.
+    if (on && missingAtlasBtn && !fieldAtlasSpecies) loadFieldAtlas();
+    updateMissingArtUI();
+    if (fieldChanged || missingChanged) {
       syncAtlasSortButtons();
       if (typeof DATA !== 'undefined' && DATA) renderAtlas(false);
     }
+  }
+  function lacksArt(sci) { return tablesReady && !!sci && !DIMS[slugify(sci)]; }
+  // Every species heard (station life list, then field recordings) that has
+  // no illustration yet. Field-only rows are marked so their stamps open the
+  // field postcard.
+  function missingArtSpecies() {
+    var seen = {}, out = [];
+    var station = (typeof DATA !== 'undefined' && DATA && DATA.lifelist && DATA.lifelist.species) || [];
+    station.forEach(function (s) {
+      if (seen[s.sci]) return;
+      seen[s.sci] = true;
+      if (lacksArt(s.sci)) out.push(s);
+    });
+    (fieldAtlasSpecies || []).forEach(function (s) {
+      if (seen[s.sci]) return;
+      seen[s.sci] = true;
+      if (!lacksArt(s.sci)) return;
+      var row = {};
+      Object.keys(s).forEach(function (k) { row[k] = s[k]; });
+      row.fieldOnly = true;
+      out.push(row);
+    });
+    return out;
+  }
+  // fromCollage: called by renderCollageFromData just before it packs. When
+  // the line appears or goes away elsewhere (admin unlocks, tables load), the
+  // collage is packed again for the room the line takes.
+  function updateMissingArtUI(fromCollage) {
+    // The button hides before adminAccessState flips when admin locks.
+    var admin = adminAccessState === 'unlocked' && !!missingAtlasBtn && !missingAtlasBtn.hidden;
+    if (missingAtlasBtn) {
+      var badge = missingAtlasBtn.querySelector('.missing-n');
+      var total = admin && tablesReady ? missingArtSpecies().length : 0;
+      if (badge) {
+        badge.textContent = total ? String(total) : '';
+        badge.hidden = !total;
+      }
+    }
+    if (!artMissingEl) return;
+    var recent = (admin && tablesReady && typeof DATA !== 'undefined' && DATA && DATA.recent
+      && Array.isArray(DATA.recent.species)) ? DATA.recent.species : [];
+    var names = recent.filter(function (s) { return lacksArt(s.sci); })
+      .map(function (s) { return s.com || s.sci; });
+    var show = names.length > 0;
+    var flipped = artMissingEl.hidden === show;
+    artMissingEl.hidden = !show;
+    var collageView = document.getElementById('v0');
+    if (collageView) collageView.classList.toggle('has-art-missing', show);
+    artMissingEl.textContent = show
+      ? names.length + (names.length === 1 ? ' bird' : ' birds') + ' without illustration: '
+        + names.slice(0, 3).join(', ') + (names.length > 3 ? ', ...' : '')
+      : '';
+    if (flipped && !fromCollage) renderCollageFromData(false);
+  }
+  if (artMissingEl) {
+    artMissingEl.addEventListener('click', function () {
+      window.__atlasSort = 'missing';
+      writeLS('bird:atlasSort', 'missing');
+      syncAtlasSortButtons();
+      renderAtlas(false);
+      go(2);
+    });
   }
   function fieldAtlasPad(n) { return (n < 10 ? '0' : '') + n; }
   // field.php's list -> one Atlas row per species, like the station lifelist.
@@ -1119,7 +1196,9 @@
       fieldAtlasError = error.message || 'field recordings unavailable';
     }).then(function () {
       fieldAtlasLoading = false;
-      if (effectiveAtlasSort() === 'elsewhere') renderAtlas(false);
+      updateMissingArtUI();
+      var sort = effectiveAtlasSort();
+      if (sort === 'elsewhere' || sort === 'missing') renderAtlas(false);
     });
   }
   atlasSortBtns.forEach(function (b) {
@@ -3288,6 +3367,7 @@
   // the shared "no detections heard in this window" message.
   function renderCollageFromData(animate) {
     if (!DATA.recent || !Array.isArray(DATA.recent.species)) return;
+    updateMissingArtUI(true);
     renderCollage(DATA.recent.species, animate);
   }
   var rTimer;
@@ -5405,22 +5485,36 @@
     }
 
     var fieldMode = effectiveAtlasSort() === 'elsewhere';
+    var missingMode = effectiveAtlasSort() === 'missing';
     syncAtlasSortButtons();
+    updateMissingArtUI();
     if (fieldMode && !fieldAtlasSpecies) {
       showAtlasEmpty('Loading birds heard elsewhere...');
       loadFieldAtlas();
       return;
     }
-    var lifelist = fieldMode ? fieldAtlasSpecies : ((DATA.lifelist && DATA.lifelist.species) || []);
-    var recent = fieldMode ? [] : ((DATA.recent && DATA.recent.species) || []);
+    if (missingMode && !tablesReady) {
+      showAtlasEmpty('Loading illustrations...');
+      return;
+    }
+    // Station birds show at once; field-only ones join when their list lands.
+    if (missingMode && !fieldAtlasSpecies) loadFieldAtlas();
+    var stationLife = (DATA.lifelist && DATA.lifelist.species) || [];
+    var lifelist = fieldMode ? fieldAtlasSpecies : missingMode ? missingArtSpecies() : stationLife;
+    var recent = fieldMode || missingMode ? [] : ((DATA.recent && DATA.recent.species) || []);
     var atlasHours = atlasWindowHours();
-    // Field recordings have no time window: they are the whole collection.
-    if (fieldMode) atlasHours = 1000000;
+    // Field recordings and the birds to illustrate have no time window.
+    if (fieldMode || missingMode) atlasHours = 1000000;
     // Window count lookup: sci -> count in current window.
     var winBySci = {};
     var recentBySci = {};
     recent.forEach(function (s) { winBySci[s.sci] = +s.n; recentBySci[s.sci] = s; });
 
+    if (!lifelist.length && missingMode) {
+      showAtlasEmpty('Every bird heard has an illustration.',
+        'Birds without one appear here, ready for the generate button on their postcard.');
+      return;
+    }
     if (!lifelist.length && fieldMode) {
       showAtlasEmpty(fieldAtlasError ? 'Field recordings unavailable: ' + escHtml(fieldAtlasError) : 'No birds from elsewhere yet.',
         'Add a recording on the map page (menu, then map).');
@@ -5451,7 +5545,8 @@
     // complete life list. Build it before sorting so Life List can use the
     // number itself as its source of truth, including tied timestamps.
     var accession = {};
-    lifelist.slice().sort(function (a, b) {
+    // The birds to illustrate keep their life-list numbers.
+    (missingMode ? stationLife.concat(lifelist.filter(function (s) { return s.fieldOnly; })) : lifelist).slice().sort(function (a, b) {
       return (a.first_seen || '').localeCompare(b.first_seen || '') ||
         (a.sci || '').localeCompare(b.sci || '');
     }).forEach(function (s, i) { accession[s.sci] = i + 1; });
@@ -5496,6 +5591,7 @@
       ? +effectiveEducatorScope.state_revision : null;
 
     var cardHtml = species.map(function (s) {
+      var isField = fieldMode || !!s.fieldOnly;
       var total = +s.n || 0;
       var win = winBySci[s.sci] || 0;
       var firstMs = Date.parse((s.first_seen || '').replace(' ', 'T'));
@@ -5507,11 +5603,11 @@
         ? educatorDetectionId(recentBySci[s.sci] && recentBySci[s.sci].detection_id)
         : null;
       // A field card plays the moment of its best detection in the uploaded file.
-      var audioSrc = fieldMode ? s.clip : mediaApiUrl('recording', { sci: s.sci, detection: detectionId }, renderedScopeId);
+      var audioSrc = isField ? s.clip : mediaApiUrl('recording', { sci: s.sci, detection: detectionId }, renderedScopeId);
       // The "all time" window makes the windowed count identical to the
       // all-time count - collapse to a single stat rather than print the
       // same number twice. Otherwise label the count with its span.
-      var allLabel = fieldMode ? 'elsewhere' : educatorScopeId() ? educatorScopeLabel(effectiveEducatorScope) : 'all time';
+      var allLabel = isField ? 'elsewhere' : educatorScopeId() ? educatorScopeLabel(effectiveEducatorScope) : 'all time';
       var statRows = isAllWindow
         ? '<div><span class="n">' + fmtNK(total) + '</span><span class="lbl-inline">' + escHtml(allLabel) + '</span></div>'
         : '<div><span class="n">' + fmtNK(win) + '</span><span class="lbl-inline">' + windowLabel(atlasHours, DATA.recent) + '</span></div>'
@@ -5528,7 +5624,7 @@
         var birdEbird = ebirdUrl(s.sci);
         return ''
           + '<article class="bird-card classic-atlas-card' + (needsArt ? ' needs-art' : '') + '"'
-          + (fieldMode ? ' data-field="1"' : '')
+          + (isField ? ' data-field="1"' : '')
           + ' data-sci="' + escHtml(s.sci) + '" data-com="' + escHtml(s.com || '') + '" data-audio="' + escHtml(audioSrc) + '"'
           + ' data-edu="' + adminAttr(renderedScopeId) + '" data-edu-generation="' + renderedScopeGeneration + '"'
           + ' data-edu-revision="' + (renderedScopeRevision === null ? '' : renderedScopeRevision) + '"'
@@ -5543,7 +5639,7 @@
           + '</div>'
           + '<h3>' + escHtml(common) + '</h3>'
           + '<div class="sci">' + escHtml(s.sci) + '</div>'
-          + (fieldMode ? '' : '<div class="spectro-wrap" aria-hidden="true"></div>')
+          + (isField ? '' : '<div class="spectro-wrap" aria-hidden="true"></div>')
           + '<div class="actions">'
           + '<button type="button" class="chip play" data-action="play" aria-label="play recording">'
           + ICON_PLAY + '<span>play</span>'
@@ -5560,7 +5656,7 @@
         sci: s.sci, com: s.com, index: accession[s.sci] || 0, count: total,
         placeholder: needsArt
       };
-      var renderKey = [fieldMode ? 'field' : 'station', s.sci, s.com || '', accession[s.sci] || 0, total,
+      var renderKey = [isField ? 'field' : 'station', s.sci, s.com || '', accession[s.sci] || 0, total,
         renderedScopeId, renderedScopeRevision, renderedStateKey, renderedStateRevision,
         detectionId || '', needsArt ? 'todo' : 'stamp', fresh,
         artRevision(s.sci, SKETCH_VERSION)].join('|');
@@ -5572,7 +5668,7 @@
         : '';
       return ''
         + '<article class="bird-card stamp-card' + (needsArt ? ' needs-art' : '') + '"'
-        + (fieldMode ? ' data-field="1"' : '')
+        + (isField ? ' data-field="1"' : '')
         + ' data-sci="' + escHtml(s.sci) + '" data-com="' + escHtml(s.com || '') + '" data-audio="' + escHtml(audioSrc) + '"'
         + ' data-edu="' + adminAttr(renderedScopeId) + '" data-edu-generation="' + renderedScopeGeneration + '"'
         + ' data-edu-revision="' + (renderedScopeRevision === null ? '' : renderedScopeRevision) + '"'
